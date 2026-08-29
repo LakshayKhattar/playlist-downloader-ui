@@ -148,7 +148,7 @@ test('remote mode still requires the configured public authority', () => {
   assert.equal(response.statusCode, 421);
 });
 
-test('optional HTTP authentication protects the app but leaves the health check available', async (t) => {
+test('optional HTTP authentication protects the API while leaving public documents and health available', async (t) => {
   const port = await freePort();
   const jobs = {
     async initialize() {},
@@ -168,6 +168,9 @@ test('optional HTTP authentication protects the app but leaves the health check 
 
   const health = await request(port, { route: '/api/health' });
   assert.equal(health.status, 200);
+
+  const publicDocument = await request(port, { route: '/robots.txt' });
+  assert.notEqual(publicDocument.status, 401);
 
   const unauthenticated = await request(port, { route: '/api/config' });
   assert.equal(unauthenticated.status, 401);
@@ -338,6 +341,7 @@ test('HTTP boundary blocks hostile hosts/origins and requires a launch token bef
   const config = await request(port, { route: '/api/config', host: `localhost:${port}` });
   assert.equal(config.status, 200);
   assert.match(config.headers['cache-control'], /no-store/);
+  assert.equal(config.headers['x-robots-tag'], 'noindex, nofollow, noarchive');
   const configBody = JSON.parse(config.body);
   const { csrfToken } = configBody;
   assert.ok(csrfToken.length >= 32);

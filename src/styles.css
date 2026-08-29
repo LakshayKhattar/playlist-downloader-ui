@@ -53,6 +53,27 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.seo-fallback {
+  width: min(760px, calc(100% - 32px));
+  margin: 12vh auto;
+  font-family: var(--sans);
+}
+
+.seo-fallback h1,
+.seo-fallback a {
+  color: var(--text-high);
+}
+
+.seo-fallback h1 {
+  font-size: clamp(34px, 6vw, 48px);
+  line-height: 1.06;
+}
+
+.seo-fallback p {
+  max-width: 680px;
+  line-height: 1.6;
+}
+
 button,
 input,
 select {
@@ -779,6 +800,17 @@ progress::-moz-progress-bar {
   display: flex;
   align-items: center;
   gap: 9px;
+}
+
+.footer-link {
+  color: var(--text-mid);
+  text-decoration: none;
+}
+
+.footer-link:hover {
+  color: var(--text-high);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .version-tag {

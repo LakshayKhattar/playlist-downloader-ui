@@ -14,7 +14,7 @@ Include the affected version, reproduction steps, impact, and any suggested reme
 
 This is a single-user downloader. Local and VPS installs bind to loopback by default. Hosted mode requires an exact HTTPS origin, explicit remote-access opt-in, and password authentication before the process will bind to `0.0.0.0`.
 
-The unauthenticated `/api/health` endpoint returns only service health and version. Every UI asset, job status endpoint, mutation, progress stream, and verified-file download requires authentication in hosted mode. Repeated incorrect credentials are rate limited. Never remove these controls or run an unauthenticated public download service.
+The public HTML shell and static assets contain only descriptive app content so crawlers can index the project. The unauthenticated `/api/health` endpoint returns only service health and version. Every other API route—including configuration, job status, mutations, progress streams, and verified-file downloads—requires authentication in hosted mode. Repeated incorrect credentials are rate limited. Never remove these API controls or run an unauthenticated public download service.
 
 Verified-file routes accept only the current opaque job ID and a numeric server-issued file index. The backend rechecks that the selected entry is a regular verified media file inside the configured download directory before serving it as an attachment.
 

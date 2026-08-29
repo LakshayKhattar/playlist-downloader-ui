@@ -58,8 +58,11 @@ jobs:
             curl --fail --silent --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/api/health && break
             sleep 1
           done
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/)" = "401"
-          curl --fail --silent --user playlist:a-ci-only-password-that-is-not-secret --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/ > /dev/null
+          curl --fail --silent --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/ > /dev/null
+          curl --fail --silent --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/robots.txt > /dev/null
+          curl --fail --silent --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/sitemap.xml > /dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/api/config)" = "401"
+          curl --fail --silent --user playlist:a-ci-only-password-that-is-not-secret --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/api/config > /dev/null
           docker exec playlist-downloader-ui-test yt-dlp --version
           docker exec playlist-downloader-ui-test ffmpeg -version
           docker exec playlist-downloader-ui-test ffprobe -version

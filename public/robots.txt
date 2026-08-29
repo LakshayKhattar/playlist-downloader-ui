@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://playlist-downloader-ui.onrender.com/sitemap.xml

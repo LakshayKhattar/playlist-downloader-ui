@@ -62,6 +62,7 @@ export async function createApplication({ jobs: suppliedJobs, tools, port = PORT
   app.use(security.requireAuthentication);
   app.use('/api', (_request, response, next) => {
     response.set('Cache-Control', 'no-store');
+    response.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
     next();
   });
 

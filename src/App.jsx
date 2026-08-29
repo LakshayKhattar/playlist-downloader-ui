@@ -443,7 +443,7 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    document.title = appName;
+    document.title = `${appName} | Secure yt-dlp Web Interface`;
   }, [appName]);
 
   useEffect(() => {
@@ -579,7 +579,7 @@ export default function App() {
       <main className="content-width main-content">
         <section className="intro" aria-labelledby="page-title">
           <h1 id="page-title">Download playlists with yt-dlp.</h1>
-          <p>Queue, resume, and verify every file from one focused interface.</p>
+          <p>Queue permitted YouTube playlists in manageable batches, follow live yt-dlp progress, and save verified MKV files.</p>
         </section>
 
         <form className="download-panel" onSubmit={submit} noValidate>
@@ -716,7 +716,8 @@ export default function App() {
       <footer className="footer">
         <div className="content-width footer__inner">
           <div className="footer-copy">
-            <span>Powered by yt-dlp</span>
+            <a className="footer-link" href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noreferrer external">Powered by yt-dlp</a>
+            <a className="footer-link" href="https://ffmpeg.org/" target="_blank" rel="noreferrer external">FFmpeg</a>
             <span className="version-tag">{config?.version ? `v${config.version}` : 'version loading'}</span>
           </div>
           {config?.repositoryUrl && (
@@ -724,7 +725,7 @@ export default function App() {
               className="github-link"
               href={config.repositoryUrl}
               target="_blank"
-              rel="noreferrer"
+              rel="noreferrer external"
               aria-label={`Open the ${appName} GitHub repository`}
               title="Project repository"
             >

@@ -2,6 +2,8 @@
 
 An independent, secure, and resumable UI and orchestration layer for [`yt-dlp`](https://github.com/yt-dlp/yt-dlp), built with React and Express. Each playlist is stored in one flat folder and verified with `ffprobe` after download.
 
+**Live app:** [playlist-downloader-ui.onrender.com](https://playlist-downloader-ui.onrender.com/)
+
 > Download only media you are permitted to save. You are responsible for complying with YouTube's terms and applicable law.
 
 ![Playlist Downloader UI in dark mode](docs/images/playlist-downloader-ui.png)
@@ -89,7 +91,7 @@ This app requires a long-running Node process, SSE connections, media executable
 - [DEPLOY.md](DEPLOY.md): complete zero-cost Docker deployment on Render, including free-tier limits
 - [GUIDE.md](GUIDE.md): local staging and same-origin VPS deployment with systemd and Caddy
 
-Local and VPS deployments bind to `127.0.0.1` by default. Render mode binds publicly only when an exact HTTPS origin and password authentication are configured. See [SECURITY.md](SECURITY.md) for the security boundary and reporting policy.
+Local and VPS deployments bind to `127.0.0.1` by default. Render mode binds publicly only when an exact HTTPS origin and password authentication are configured. Its descriptive HTML and static assets remain public for indexing, while every API route except the minimal health check remains authenticated. See [SECURITY.md](SECURITY.md) for the security boundary and reporting policy.
 
 ## Credits
 

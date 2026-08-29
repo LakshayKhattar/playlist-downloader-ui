@@ -128,7 +128,7 @@ try {
 
   const title = await cdp.evaluate('document.title');
   const heading = await cdp.evaluate("document.querySelector('h1')?.textContent");
-  if (title !== 'Playlist Downloader' || heading !== 'Download playlists with yt-dlp.') {
+  if (title !== 'Playlist Downloader | Secure yt-dlp Web Interface' || heading !== 'Download playlists with yt-dlp.') {
     throw new Error(`Unexpected page content: ${title} / ${heading}`);
   }
   const initialQueueVisible = await cdp.evaluate("Boolean(document.querySelector('.queue-panel'))");

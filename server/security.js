@@ -113,7 +113,9 @@ export function createSecurityContext({
 
   function requireAuthentication(request, response, next) {
     const isHealthCheck = ['GET', 'HEAD'].includes(request.method) && request.path === '/api/health';
-    if (!authenticationEnabled || isHealthCheck) {
+    const isApiRequest = request.path === '/api' || request.path.startsWith('/api/');
+    const isPublicDocument = ['GET', 'HEAD'].includes(request.method) && !isApiRequest;
+    if (!authenticationEnabled || isHealthCheck || isPublicDocument) {
       next();
       return;
     }
@@ -141,7 +143,7 @@ export function createSecurityContext({
       'WWW-Authenticate': `Basic realm="${realm}", charset="UTF-8"`,
       'Cache-Control': 'no-store',
     });
-    if (request.path.startsWith('/api/')) {
+    if (isApiRequest) {
       response.status(401).json({ error: 'Authentication is required.', code: 'AUTH_REQUIRED' });
     } else {
       response.status(401).type('text/plain').send('Authentication is required.');
