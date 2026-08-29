@@ -26,8 +26,8 @@
     "dev:server": "node --watch server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test --test-isolation=none test/config.test.js test/progress.test.js test/validation.test.js test/security.test.js",
-    "test:security": "node --test --test-isolation=none test/security.test.js",
+    "test": "node --test test/config.test.js test/progress.test.js test/validation.test.js test/security.test.js",
+    "test:security": "node --test test/security.test.js",
     "test:ui": "node test/ui-e2e.mjs",
     "audit:offline": "npm audit --offline --audit-level=high",
     "verify": "npm run test && npm run build && npm run audit:offline"
