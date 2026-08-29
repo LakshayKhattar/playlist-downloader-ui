@@ -290,7 +290,8 @@ test('job manager resolves only verified regular media inside its output directo
 
   const file = await jobs.getDownloadFile(jobId, 0);
   assert.equal(file.name, '001 - Verified track.mkv');
-  assert.equal(file.path, path.join(temporaryDirectory, mediaName));
+  assert.equal(path.basename(file.path), mediaName);
+  assert.equal(await fs.readFile(file.path, 'utf8'), 'verified media fixture');
   assert.equal(await jobs.getDownloadFile('11111111-1111-4111-8111-111111111111', 0), null);
   jobs.job.files[0] = { name: '../outside.mkv', verified: true };
   assert.equal(await jobs.getDownloadFile(jobId, 0), null);
