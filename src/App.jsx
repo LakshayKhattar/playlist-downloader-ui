@@ -88,9 +88,11 @@ function displayState(value) {
 function normalizeItems(job) {
   if (!job) return [];
   const sourceItems = Array.isArray(job.items) ? job.items : [];
+  const files = Array.isArray(job.files) ? job.files : [];
   if (sourceItems.length) {
     return sourceItems.map((item, offset) => {
       const percent = clampPercent(item.percent ?? item.progress?.percent, 0);
+      const completedFile = files.find((file) => Number(file.index) === Number(item.index || offset + 1));
       return {
         key: item.id || item.name || `${offset}-${item.index || ''}`,
         index: Number(item.index || item.playlistIndex || offset + 1),
@@ -100,11 +102,11 @@ function normalizeItems(job) {
         speed: humanSpeed(item.speed ?? item.progress?.speed),
         eta: item.eta ?? item.progress?.eta ?? '',
         size: humanBytes(item.size ?? item.bytes),
+        downloadUrl: completedFile?.downloadUrl || '',
       };
     });
   }
 
-  const files = Array.isArray(job.files) ? job.files : [];
   const normalized = files.map((file, offset) => ({
     key: file.id || file.name || `file-${offset}`,
     index: Number(file.index || offset + 1),
@@ -114,6 +116,7 @@ function normalizeItems(job) {
     speed: '',
     eta: '',
     size: humanBytes(file.size),
+    downloadUrl: file.downloadUrl || '',
   }));
 
   if (job.current?.title || job.current?.id) {
@@ -128,6 +131,7 @@ function normalizeItems(job) {
       speed: humanSpeed(job.current.speed),
       eta: job.current.eta || '',
       size: '',
+      downloadUrl: '',
     };
     if (existingIndex >= 0) normalized[existingIndex] = current;
     else normalized.push(current);
@@ -224,6 +228,9 @@ function QueueRow({ item, total }) {
       </div>
       <div className="queue-row__meta" aria-label={`Status ${item.state.label}`}>
         {meta.map((value, index) => <span key={`${value}-${index}`}>{value}</span>)}
+        {item.downloadUrl && (
+          <a className="file-download" href={item.downloadUrl} download>Save file</a>
+        )}
       </div>
       <progress max="100" value={percent} aria-label={`${item.title} progress: ${Math.round(percent)} percent`} />
     </li>

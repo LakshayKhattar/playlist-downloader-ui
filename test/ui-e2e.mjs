@@ -5,6 +5,7 @@ import path from 'node:path';
 
 const APP_URL = process.env.PLAYLIST_APP_URL || 'http://127.0.0.1:4173/';
 const PLAYLIST_URL = process.env.PLAYLIST_E2E_URL || process.argv[2] || '';
+const DOCS_SCREENSHOT = process.env.PLAYLIST_DOCS_SCREENSHOT === '1';
 const EDGE = process.env.EDGE_BIN || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const artifactsDirectory = path.join(projectRoot, 'test-artifacts');
@@ -107,6 +108,12 @@ try {
   cdp = await connectCdp(page.webSocketDebuggerUrl);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 1000,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
   await cdp.send('Page.navigate', { url: APP_URL });
   await waitFor(
     () => cdp.evaluate("document.readyState === 'complete' && Boolean(document.querySelector('#playlist-url'))"),
@@ -218,9 +225,22 @@ try {
     cancelled = true;
   }
 
+  if (DOCS_SCREENSHOT) {
+    await setInput('');
+    await waitFor(
+      () => cdp.evaluate("!document.querySelector('.queue-panel') && !document.querySelector('.field-error')"),
+      2_000,
+      'clean documentation state',
+    );
+  }
+
   await fs.mkdir(artifactsDirectory, { recursive: true });
+  const desktopPath = DOCS_SCREENSHOT
+    ? path.join(projectRoot, 'docs', 'images', 'playlist-downloader-ui.png')
+    : path.join(artifactsDirectory, 'desktop.png');
+  await fs.mkdir(path.dirname(desktopPath), { recursive: true });
   const desktopCapture = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
-  await fs.writeFile(path.join(artifactsDirectory, 'desktop.png'), Buffer.from(desktopCapture.data, 'base64'));
+  await fs.writeFile(desktopPath, Buffer.from(desktopCapture.data, 'base64'));
 
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 390,
@@ -256,7 +276,7 @@ try {
     playlistStarted: started,
     playlistCancelled: cancelled,
     screenshots: [
-      path.join(artifactsDirectory, 'desktop.png'),
+      desktopPath,
       path.join(artifactsDirectory, 'mobile.png'),
     ],
   }, null, 2)}\n`);

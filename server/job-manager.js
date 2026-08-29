@@ -20,7 +20,7 @@ import { isPathInside, parseDownloadRequest, safeFolderName } from './validation
 const ACTIVE_STATES = new Set(['preparing', 'downloading', 'retrying', 'verifying', 'canceling']);
 const MEDIA_EXTENSIONS = new Set(['.mkv', '.mp4', '.webm', '.mov']);
 const FINAL_EXTENSION = '.mkv';
-const MAX_SINGLE_FILE_BYTES = 20 * 1024 ** 3;
+const MAX_SINGLE_FILE_BYTES = Math.min(20 * 1024 ** 3, MAX_DOWNLOAD_BYTES);
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
 class PublicJobError extends Error {
@@ -71,6 +71,18 @@ export function idFromFilename(filename) {
 export function indexFromFilename(filename) {
   const value = Number.parseInt(filename.match(/^(\d{1,6})\s+-\s+/)?.[1] || '', 10);
   return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+export function publicFileName(name) {
+  if (typeof name !== 'string') return 'Downloaded file';
+  return name
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/^(\d{1,6}\s+-\s+)\[[A-Za-z0-9_-]{11}\]\s*/, '$1')
+    .replace(/\s*\[[A-Za-z0-9_-]{11}\](?=(?:\.[^.]+)+$)/, '')
+    .replace(/\s*\[[A-Za-z0-9_-]{11}(?=(?:\.[^.]+)+$)/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240) || 'Downloaded file';
 }
 
 function buildPreflightArgs(url) {
@@ -289,15 +301,14 @@ async function preserveInvalidFiles(files, missingIds, recoveryDirectory, root) 
 
 export function toPublicJob(job) {
   if (!job) return null;
-  const publicFiles = job.files.map(({ name, size, verified }) => ({
-    name: typeof name === 'string'
-      ? name
-        .replace(/^(\d{1,6}\s+-\s+)\[[A-Za-z0-9_-]{11}\]\s*/, '$1')
-        .replace(/\s*\[[A-Za-z0-9_-]{11}\](?=(?:\.[^.]+)+$)/, '')
-        .replace(/\s*\[[A-Za-z0-9_-]{11}(?=(?:\.[^.]+)+$)/, '')
-      : 'Downloaded file',
+  const publicFiles = job.files.map(({ name, size, verified }, index) => ({
+    name: publicFileName(name),
+    index: indexFromFilename(name) || index + 1,
     size,
     verified,
+    downloadUrl: verified === true
+      ? `/api/jobs/${encodeURIComponent(job.id)}/files/${index}`
+      : null,
   }));
   return clone({
     id: job.id,
@@ -347,6 +358,28 @@ export class JobManager {
 
   getSnapshot() {
     return toPublicJob(this.job);
+  }
+
+  async getDownloadFile(jobId, fileIndex) {
+    if (!this.job || jobId !== this.job.id || !Number.isSafeInteger(fileIndex) || fileIndex < 0) return null;
+    const file = this.job.files[fileIndex];
+    if (!file || file.verified !== true || typeof file.name !== 'string'
+      || path.basename(file.name) !== file.name
+      || !MEDIA_EXTENSIONS.has(path.extname(file.name).toLowerCase())) return null;
+
+    const outputDirectory = await assertNormalDirectory(this.job.outputDirectory, this.rootReal);
+    const candidate = path.resolve(outputDirectory, file.name);
+    if (!isPathInside(outputDirectory, candidate)) return null;
+    try {
+      const stat = await fs.lstat(candidate);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > MAX_SINGLE_FILE_BYTES) return null;
+      const realFile = await fs.realpath(candidate);
+      if (!isPathInside(outputDirectory, realFile)) return null;
+      return { path: realFile, name: publicFileName(file.name), size: stat.size };
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
   }
 
   subscribe(listener) {

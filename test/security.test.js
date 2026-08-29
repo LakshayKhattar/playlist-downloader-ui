@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { toPublicJob } from '../server/job-manager.js';
+import { JobManager, toPublicJob } from '../server/job-manager.js';
 import {
+  basicCredentialsMatch,
   buildAllowedAuthorities,
   buildAllowedOrigins,
+  createSecurityContext,
   isAllowedAuthority,
   isAllowedOrigin,
   isLoopbackPeer,
@@ -31,6 +35,7 @@ function request(port, {
   host = `127.0.0.1:${port}`,
   origin,
   token,
+  authorization,
   body,
   contentType = 'application/json',
 } = {}) {
@@ -38,6 +43,7 @@ function request(port, {
   const headers = { Host: host, Connection: 'close' };
   if (origin !== undefined) headers.Origin = origin;
   if (token !== undefined) headers['X-Playlist-Token'] = token;
+  if (authorization !== undefined) headers.Authorization = authorization;
   if (payload !== null) {
     if (contentType) headers['Content-Type'] = contentType;
     headers['Content-Length'] = Buffer.byteLength(payload);
@@ -101,6 +107,104 @@ test('security helpers enforce exact loopback authorities, origins, peers, and t
   assert.equal(tokenMatches('a'.repeat(43), 'a'.repeat(43)), true);
   assert.equal(tokenMatches('b'.repeat(43), 'a'.repeat(43)), false);
   assert.equal(tokenMatches('', 'a'.repeat(43)), false);
+
+  const authorization = `Basic ${Buffer.from('playlist:a-strong-render-password').toString('base64')}`;
+  assert.equal(basicCredentialsMatch(authorization, 'playlist', 'a-strong-render-password'), true);
+  assert.equal(basicCredentialsMatch(authorization, 'playlist', 'wrong-password-value'), false);
+  assert.equal(basicCredentialsMatch('Bearer token', 'playlist', 'a-strong-render-password'), false);
+});
+
+test('remote mode still requires the configured public authority', () => {
+  const security = createSecurityContext({
+    port: 10000,
+    publicUrl: 'https://playlist-downloader-ui.onrender.com',
+    allowRemotePeer: true,
+    authUsername: 'playlist',
+    authPassword: 'a-strong-render-password',
+  });
+  assert.equal(security.allowedAuthorities.has('127.0.0.1:10000'), false);
+  assert.equal(security.allowedOrigins.has('http://localhost:5173'), false);
+  assert.equal(security.allowedAuthorities.has('playlist-downloader-ui.onrender.com'), true);
+  assert.equal(security.allowedOrigins.has('https://playlist-downloader-ui.onrender.com'), true);
+  let allowed = false;
+  const response = {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+  security.boundaryGuard({
+    socket: { remoteAddress: '10.0.0.8' },
+    headers: { host: 'playlist-downloader-ui.onrender.com' },
+  }, response, () => { allowed = true; });
+  assert.equal(allowed, true);
+
+  allowed = false;
+  security.boundaryGuard({
+    socket: { remoteAddress: '10.0.0.8' },
+    headers: { host: 'attacker.example' },
+  }, response, () => { allowed = true; });
+  assert.equal(allowed, false);
+  assert.equal(response.statusCode, 421);
+});
+
+test('optional HTTP authentication protects the app but leaves the health check available', async (t) => {
+  const port = await freePort();
+  const jobs = {
+    async initialize() {},
+    getSnapshot: () => null,
+    subscribe: () => () => {},
+    async shutdown() {},
+  };
+  const runtime = await startServer({
+    port,
+    jobs,
+    securityOptions: {
+      authUsername: 'playlist',
+      authPassword: 'a-strong-render-password',
+    },
+  });
+  t.after(() => runtime.stop());
+
+  const health = await request(port, { route: '/api/health' });
+  assert.equal(health.status, 200);
+
+  const unauthenticated = await request(port, { route: '/api/config' });
+  assert.equal(unauthenticated.status, 401);
+  assert.match(unauthenticated.headers['www-authenticate'], /^Basic realm=/);
+  assert.equal(JSON.parse(unauthenticated.body).code, 'AUTH_REQUIRED');
+
+  const wrong = await request(port, {
+    route: '/api/config',
+    authorization: `Basic ${Buffer.from('playlist:not-the-password').toString('base64')}`,
+  });
+  assert.equal(wrong.status, 401);
+
+  const accepted = await request(port, {
+    route: '/api/config',
+    authorization: `Basic ${Buffer.from('playlist:a-strong-render-password').toString('base64')}`,
+  });
+  assert.equal(accepted.status, 200);
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const rejected = await request(port, {
+      route: '/api/config',
+      authorization: `Basic ${Buffer.from(`playlist:wrong-${attempt}`).toString('base64')}`,
+    });
+    assert.equal(rejected.status, 401);
+  }
+  const rateLimited = await request(port, {
+    route: '/api/config',
+    authorization: `Basic ${Buffer.from('playlist:another-wrong-password').toString('base64')}`,
+  });
+  assert.equal(rateLimited.status, 429);
+  assert.equal(JSON.parse(rateLimited.body).code, 'AUTH_RATE_LIMITED');
+
+  const ownerStillAccepted = await request(port, {
+    route: '/api/config',
+    authorization: `Basic ${Buffer.from('playlist:a-strong-render-password').toString('base64')}`,
+  });
+  assert.equal(ownerStillAccepted.status, 200);
 });
 
 test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs', () => {
@@ -129,10 +233,67 @@ test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs
   assert.equal('log' in publicJob, false);
   assert.equal('id' in publicJob.items[0], false);
   assert.equal(publicJob.files[0].name, '001 - Track.mkv');
+  assert.equal(publicJob.files[0].index, 1);
+  assert.equal(publicJob.files[0].downloadUrl, '/api/jobs/00000000-0000-4000-8000-000000000000/files/0');
   assert.equal(publicJob.files[1].name, '002 - Track.f137.webm');
+  assert.equal(publicJob.files[1].downloadUrl, null);
   assert.equal(publicJob.files[2].name, '003 - Track.mkv');
   assert.equal(publicJob.files[3].name, '004 - Track.mkv');
   assert.doesNotMatch(serialized, /C:\\\\Users|playlist\?list=|abcdefghijk|lmnopqrstuv|zyxwvutsrqp|mnopqrstuvw/);
+});
+
+test('verified file downloads use opaque job and numeric file identifiers', async (t) => {
+  const port = await freePort();
+  const jobId = '00000000-0000-4000-8000-000000000000';
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'playlist-download-route-'));
+  const mediaPath = path.join(temporaryDirectory, 'verified.mkv');
+  await fs.writeFile(mediaPath, 'verified media fixture');
+  t.after(() => fs.rm(temporaryDirectory, { recursive: true, force: true }));
+  const jobs = {
+    async initialize() {},
+    getSnapshot: () => null,
+    getDownloadFile: async (candidateJobId, index) => (
+      candidateJobId === jobId && index === 0
+        ? { path: mediaPath, name: '001 - Verified track.mkv', size: 22 }
+        : null
+    ),
+    subscribe: () => () => {},
+    async shutdown() {},
+  };
+  const runtime = await startServer({ port, jobs });
+  t.after(() => runtime.stop());
+
+  const downloaded = await request(port, { route: `/api/jobs/${jobId}/files/0` });
+  assert.equal(downloaded.status, 200);
+  assert.equal(downloaded.body, 'verified media fixture');
+  assert.match(downloaded.headers['content-disposition'], /^attachment;/);
+  assert.match(downloaded.headers['cache-control'], /no-store/);
+
+  const invalidIndex = await request(port, { route: `/api/jobs/${jobId}/files/..%2F0` });
+  assert.equal(invalidIndex.status, 404);
+});
+
+test('job manager resolves only verified regular media inside its output directory', async (t) => {
+  const jobId = '00000000-0000-4000-8000-000000000000';
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'playlist-download-file-'));
+  const mediaName = '001 - [abcdefghijk] Verified track.mkv';
+  await fs.writeFile(path.join(temporaryDirectory, mediaName), 'verified media fixture');
+  t.after(() => fs.rm(temporaryDirectory, { recursive: true, force: true }));
+
+  const jobs = Object.create(JobManager.prototype);
+  jobs.rootReal = temporaryDirectory;
+  jobs.job = {
+    id: jobId,
+    outputDirectory: temporaryDirectory,
+    files: [{ name: mediaName, verified: true }],
+  };
+
+  const file = await jobs.getDownloadFile(jobId, 0);
+  assert.equal(file.name, '001 - Verified track.mkv');
+  assert.equal(file.path, path.join(temporaryDirectory, mediaName));
+  assert.equal(await jobs.getDownloadFile('11111111-1111-4111-8111-111111111111', 0), null);
+  jobs.job.files[0] = { name: '../outside.mkv', verified: true };
+  assert.equal(await jobs.getDownloadFile(jobId, 0), null);
 });
 
 test('HTTP boundary blocks hostile hosts/origins and requires a launch token before parsing JSON', async (t) => {

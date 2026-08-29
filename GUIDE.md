@@ -1,6 +1,8 @@
 # Staging and deployment guide
 
-This application needs Node.js, `yt-dlp`, `ffmpeg`, persistent storage, and long-lived HTTP/SSE connections. It is not suitable for static-only or serverless hosting.
+This application needs Node.js, `yt-dlp`, `ffmpeg`, storage, and long-lived HTTP/SSE connections. It is not suitable for static-only or serverless hosting.
+
+For a complete Docker deployment on Render, use [DEPLOY.md](DEPLOY.md). This guide covers local staging and a conventional VPS.
 
 ## 1. Test a local staging build
 
@@ -39,7 +41,7 @@ Copy `.env.example` to `.env`. Important values:
 - `YT_DLP_BIN`, `FFMPEG_BIN`, `FFPROBE_BIN`: optional absolute tool paths.
 - Resource limits: keep the supplied defaults unless storage and workload have been reviewed.
 
-Never commit `.env`. The service always binds to `127.0.0.1`; do not expose its Node port directly.
+Never commit `.env`. Keep the service on `127.0.0.1` unless you intentionally enable the authenticated hosted mode documented in [DEPLOY.md](DEPLOY.md). Do not expose an unauthenticated Node port.
 
 ## 3. Deploy on an Ubuntu VPS
 
@@ -61,6 +63,7 @@ Create `/opt/playlist-downloader/app/.env`:
 ```dotenv
 NODE_ENV=production
 APP_PUBLIC_URL=https://downloads.example.com
+ALLOW_REMOTE_ACCESS=false
 PLAYLIST_DOWNLOADS_ROOT=/var/lib/playlist-downloader
 DOWNLOADS_LABEL=downloads
 PORT=4173
@@ -131,6 +134,8 @@ Point DNS to the VPS, generate a Caddy password hash, reload Caddy, and allow on
 - Media tools: yt-dlp/ffmpeg must run on the backend host.
 - Storage: the configured downloads directory must be persistent and writable only by the service account.
 - Origin: serve frontend and `/api` from the same public origin. Do not split them across unrelated domains.
+
+The VPS example keeps Node on loopback and lets Caddy enforce authentication. Render instead uses the app's explicit `ALLOW_REMOTE_ACCESS=true` mode and built-in password protection.
 
 ## 5. Release and rollback
 

@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: playlist-downloader-ui
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: checksPass
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 120
+    numInstances: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BIND_HOST
+        value: 0.0.0.0
+      - key: ALLOW_REMOTE_ACCESS
+        value: "true"
+      - key: APP_AUTH_USERNAME
+        value: playlist
+      - key: APP_AUTH_PASSWORD
+        sync: false
+      - key: APP_REPOSITORY_URL
+        value: https://github.com/LakshayKhattar/playlist-downloader-ui
+      - key: PLAYLIST_DOWNLOADS_ROOT
+        value: /app/downloads
+      - key: DOWNLOADS_LABEL
+        value: temporary downloads
+      - key: DEFAULT_QUALITY
+        value: best
+      - key: MAX_PLAYLIST_ITEMS
+        value: "20"
+      - key: MAX_TOTAL_DURATION_SECONDS
+        value: "21600"
+      - key: MAX_DOWNLOAD_BYTES
+        value: "2147483648"
+      - key: MIN_FREE_BYTES
+        value: "536870912"
+      - key: MAX_JOB_RUNTIME_MS
+        value: "10800000"
+      - key: DOWNLOAD_INACTIVITY_MS
+        value: "900000"
+      - key: MAX_DOWNLOAD_PASSES
+        value: "2"
+      - key: MAX_SSE_CLIENTS
+        value: "4"

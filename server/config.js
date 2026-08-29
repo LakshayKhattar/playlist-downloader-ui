@@ -23,6 +23,14 @@ function integerSetting(name, fallback, { min, max }) {
   return value;
 }
 
+function booleanSetting(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${name} must be either true or false.`);
+}
+
 function textSetting(name, fallback, { maxLength = 80, pattern } = {}) {
   const raw = process.env[name];
   const value = raw === undefined || raw === '' ? fallback : raw.trim();
@@ -49,6 +57,15 @@ function optionalHttpsUrl(name, fallback = '') {
   return parsed.href;
 }
 
+function optionalSecretSetting(name) {
+  const value = process.env[name] || '';
+  if (!value) return '';
+  if (value.length < 24 || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`${name} must be from 24 to 256 characters and contain no control characters.`);
+  }
+  return value;
+}
+
 export function normalizePublicUrl(value) {
   if (value === undefined || value === null || String(value).trim() === '') return '';
   let parsed;
@@ -63,6 +80,15 @@ export function normalizePublicUrl(value) {
     throw new Error('APP_PUBLIC_URL must be an HTTPS origin with no path, query, fragment, or credentials.');
   }
   return parsed.origin;
+}
+
+export function renderPublicUrl(hostname) {
+  const value = String(hostname || '').trim().toLowerCase();
+  if (!value) return '';
+  if (value.length > 253 || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value)) {
+    throw new Error('RENDER_EXTERNAL_HOSTNAME must be a valid hostname.');
+  }
+  return `https://${value}`;
 }
 
 function absoluteDirectorySetting(name, fallback) {
@@ -104,10 +130,22 @@ function packageRepositoryUrl() {
 export const APP_NAME = textSetting('APP_NAME', 'Playlist Downloader', { maxLength: 64 });
 export const APP_VERSION = packageMetadata.version;
 export const APP_REPOSITORY_URL = optionalHttpsUrl('APP_REPOSITORY_URL', packageRepositoryUrl());
-export const APP_PUBLIC_URL = normalizePublicUrl(process.env.APP_PUBLIC_URL);
-export const HOST = '127.0.0.1';
+export const APP_PUBLIC_URL = normalizePublicUrl(
+  process.env.APP_PUBLIC_URL || renderPublicUrl(process.env.RENDER_EXTERNAL_HOSTNAME),
+);
+export const ALLOW_REMOTE_ACCESS = booleanSetting('ALLOW_REMOTE_ACCESS');
+export const HOST = textSetting('BIND_HOST', ALLOW_REMOTE_ACCESS ? '0.0.0.0' : '127.0.0.1', {
+  maxLength: 15,
+  pattern: /^(?:127\.0\.0\.1|0\.0\.0\.0)$/,
+});
 export const PORT = integerSetting('PORT', 4173, { min: 1024, max: 65535 });
 export const DEV_PORT = integerSetting('DEV_PORT', 5173, { min: 1024, max: 65535 });
+export const APP_AUTH_USERNAME = textSetting('APP_AUTH_USERNAME', 'playlist', {
+  maxLength: 64,
+  pattern: /^[A-Za-z0-9._-]+$/,
+});
+export const APP_AUTH_PASSWORD = optionalSecretSetting('APP_AUTH_PASSWORD');
+export const AUTHENTICATION_ENABLED = Boolean(APP_AUTH_PASSWORD);
 export const DOWNLOADS_ROOT = absoluteDirectorySetting(
   'PLAYLIST_DOWNLOADS_ROOT',
   path.join(APP_ROOT, 'downloads'),
@@ -129,6 +167,15 @@ export const DEFAULT_QUALITY = (() => {
   if (!isQualityProfile(value)) throw new Error('DEFAULT_QUALITY must be best, 1080, or 720.');
   return value;
 })();
+
+if (ALLOW_REMOTE_ACCESS) {
+  if (HOST !== '0.0.0.0') throw new Error('Remote access requires BIND_HOST=0.0.0.0.');
+  if (!APP_PUBLIC_URL) throw new Error('Remote access requires APP_PUBLIC_URL or RENDER_EXTERNAL_HOSTNAME.');
+  if (new URL(APP_PUBLIC_URL).protocol !== 'https:') throw new Error('Remote access requires an HTTPS public URL.');
+  if (!AUTHENTICATION_ENABLED) throw new Error('Remote access requires APP_AUTH_PASSWORD.');
+} else if (HOST !== '127.0.0.1') {
+  throw new Error('BIND_HOST can be public only when ALLOW_REMOTE_ACCESS=true.');
+}
 
 export function resolveToolchain() {
   const ytDlp = resolveExecutable('yt-dlp', process.env.YT_DLP_BIN);

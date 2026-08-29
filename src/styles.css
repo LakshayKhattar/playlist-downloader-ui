@@ -632,6 +632,18 @@ progress::-moz-progress-bar {
   color: var(--text-low);
 }
 
+.file-download {
+  margin-left: auto;
+  color: var(--text-high);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.file-download:hover {
+  text-decoration-thickness: 2px;
+}
+
 .queue-empty {
   min-height: 138px;
   padding: 26px 20px;

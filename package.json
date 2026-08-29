@@ -1,7 +1,7 @@
 {
   "name": "playlist-downloader-ui",
   "version": "1.0.0",
-  "description": "A secure, resumable local web interface for downloading and verifying YouTube playlists with yt-dlp.",
+  "description": "A secure, resumable web interface and job layer for downloading and verifying YouTube playlists with yt-dlp.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -26,8 +26,8 @@
     "dev:server": "node --watch server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test test/config.test.js test/progress.test.js test/validation.test.js test/security.test.js",
-    "test:security": "node --test test/security.test.js",
+    "test": "node --test --test-isolation=none test/config.test.js test/progress.test.js test/validation.test.js test/security.test.js",
+    "test:security": "node --test --test-isolation=none test/security.test.js",
     "test:ui": "node test/ui-e2e.mjs",
     "audit:offline": "npm audit --offline --audit-level=high",
     "verify": "npm run test && npm run build && npm run audit:offline"
@@ -43,6 +43,6 @@
     "vite": "^7.1.3"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

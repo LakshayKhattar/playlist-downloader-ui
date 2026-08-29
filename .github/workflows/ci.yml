@@ -31,3 +31,41 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+
+  container:
+    name: Docker production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build image
+        run: docker build --tag playlist-downloader-ui:test .
+      - name: Start production container
+        run: >-
+          docker run --detach --name playlist-downloader-ui-test
+          --publish 10000:10000
+          --env PORT=10000
+          --env BIND_HOST=0.0.0.0
+          --env ALLOW_REMOTE_ACCESS=true
+          --env RENDER_EXTERNAL_HOSTNAME=playlist-downloader-ui.onrender.com
+          --env APP_AUTH_USERNAME=playlist
+          --env APP_AUTH_PASSWORD=a-ci-only-password-that-is-not-secret
+          playlist-downloader-ui:test
+      - name: Verify health and authentication
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            curl --fail --silent --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/api/health && break
+            sleep 1
+          done
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/)" = "401"
+          curl --fail --silent --user playlist:a-ci-only-password-that-is-not-secret --header 'Host: playlist-downloader-ui.onrender.com' http://127.0.0.1:10000/ > /dev/null
+          docker exec playlist-downloader-ui-test yt-dlp --version
+          docker exec playlist-downloader-ui-test ffmpeg -version
+          docker exec playlist-downloader-ui-test ffprobe -version
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs playlist-downloader-ui-test
+      - name: Stop production container
+        if: always()
+        run: docker rm --force playlist-downloader-ui-test

@@ -4,6 +4,8 @@ An independent, secure, and resumable UI and orchestration layer for [`yt-dlp`](
 
 > Download only media you are permitted to save. You are responsible for complying with YouTube's terms and applicable law.
 
+![Playlist Downloader UI in dark mode](docs/images/playlist-downloader-ui.png)
+
 ## Features
 
 - Best available, 1080p, and 720p quality profiles
@@ -11,6 +13,7 @@ An independent, secure, and resumable UI and orchestration layer for [`yt-dlp`](
 - Collapsible queue that appears only after a playlist URL is entered
 - Resume-aware retries, archive tracking, and final media verification
 - Configurable storage, app identity, quality, resource limits, ports, and tool paths
+- Authenticated Docker/Render mode with browser retrieval for verified files
 - Dark and light responsive UI with keyboard and reduced-motion support
 - Loopback-only backend with strict origin, input, filesystem, and process controls
 
@@ -53,6 +56,10 @@ Copy [`.env.example`](.env.example) to `.env`. All settings are optional and hav
 | `PLAYLIST_DOWNLOADS_ROOT` | `<app>/downloads` | Absolute persistent output directory |
 | `PORT` / `DEV_PORT` | `4173` / `5173` | Backend and Vite development ports |
 | `APP_PUBLIC_URL` | empty | Exact HTTPS reverse-proxy origin for hosted use |
+| `BIND_HOST` | `127.0.0.1` | Loopback locally; `0.0.0.0` only in authenticated remote mode |
+| `ALLOW_REMOTE_ACCESS` | `false` | Explicitly enables traffic through a hosting proxy |
+| `APP_AUTH_USERNAME` | `playlist` | Username used when password protection is enabled |
+| `APP_AUTH_PASSWORD` | empty | Required secret when remote access is enabled |
 | `YT_DLP_BIN` | auto-detected | Absolute `yt-dlp` executable path |
 | `FFMPEG_BIN` / `FFPROBE_BIN` | auto-detected | Absolute media-tool paths |
 
@@ -73,9 +80,12 @@ npm run test:ui -- "https://www.youtube.com/playlist?list=PLAYLIST_ID"
 
 ## Deployment
 
-This app requires a long-running Node process, SSE connections, media executables, and persistent disk. It is not compatible with static-only or serverless hosting. See [GUIDE.md](GUIDE.md) for local staging and a same-origin VPS deployment using systemd and Caddy.
+This app requires a long-running Node process, SSE connections, media executables, and writable storage. It is not compatible with static-only or serverless hosting. The included Render Blueprint uses the free tier and temporary storage; save verified files through the UI before the service resets.
 
-Do not expose the Node port directly. The server binds only to `127.0.0.1`; hosted deployments should put an authenticated HTTPS reverse proxy on the same machine. See [SECURITY.md](SECURITY.md) for the security boundary and reporting policy.
+- [DEPLOY.md](DEPLOY.md): complete zero-cost Docker deployment on Render, including free-tier limits
+- [GUIDE.md](GUIDE.md): local staging and same-origin VPS deployment with systemd and Caddy
+
+Local and VPS deployments bind to `127.0.0.1` by default. Render mode binds publicly only when an exact HTTPS origin and password authentication are configured. See [SECURITY.md](SECURITY.md) for the security boundary and reporting policy.
 
 ## Credits
 

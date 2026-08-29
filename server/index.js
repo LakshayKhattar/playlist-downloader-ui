@@ -4,7 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import {
+  ALLOW_REMOTE_ACCESS,
   APP_NAME,
+  APP_AUTH_PASSWORD,
+  APP_AUTH_USERNAME,
   APP_PUBLIC_URL,
   APP_REPOSITORY_URL,
   APP_ROOT,
@@ -33,10 +36,19 @@ function jsonError(response, status, error, code) {
   response.status(status).json({ error, ...(code ? { code } : {}) });
 }
 
-export async function createApplication({ jobs: suppliedJobs, tools, port = PORT } = {}) {
+export async function createApplication({ jobs: suppliedJobs, tools, port = PORT, securityOptions = {} } = {}) {
   const jobs = suppliedJobs || new JobManager({ tools: tools || resolveToolchain() });
   await jobs.initialize?.();
-  const security = createSecurityContext({ port, devPort: DEV_PORT, publicUrl: APP_PUBLIC_URL });
+  const security = createSecurityContext({
+    ...securityOptions,
+    port,
+    devPort: DEV_PORT,
+    publicUrl: APP_PUBLIC_URL,
+    allowRemotePeer: securityOptions.allowRemotePeer ?? ALLOW_REMOTE_ACCESS,
+    authUsername: securityOptions.authUsername ?? APP_AUTH_USERNAME,
+    authPassword: securityOptions.authPassword ?? APP_AUTH_PASSWORD,
+    appName: APP_NAME,
+  });
   const app = express();
   const jsonParser = express.json({ limit: JSON_LIMIT, strict: true, type: 'application/json' });
   let activeStreams = 0;
@@ -46,6 +58,7 @@ export async function createApplication({ jobs: suppliedJobs, tools, port = PORT
   app.set('trust proxy', false);
   app.use(applySecurityHeaders);
   app.use(security.boundaryGuard);
+  app.use(security.requireAuthentication);
   app.use('/api', (_request, response, next) => {
     response.set('Cache-Control', 'no-store');
     next();
@@ -76,6 +89,36 @@ export async function createApplication({ jobs: suppliedJobs, tools, port = PORT
     response.json({ job: jobs.getSnapshot() });
   });
 
+  app.get('/api/jobs/:jobId/files/:fileIndex', async (request, response, next) => {
+    const { jobId, fileIndex: rawFileIndex } = request.params;
+    const fileIndex = Number(rawFileIndex);
+    if (!/^[0-9a-f-]{36}$/i.test(jobId) || !/^\d{1,4}$/.test(rawFileIndex)
+      || !Number.isSafeInteger(fileIndex) || typeof jobs.getDownloadFile !== 'function') {
+      jsonError(response, 404, 'Verified file not found.');
+      return;
+    }
+    try {
+      const file = await jobs.getDownloadFile(jobId, fileIndex);
+      if (!file) {
+        jsonError(response, 404, 'Verified file not found.');
+        return;
+      }
+      response.set('Cache-Control', 'private, no-store');
+      response.download(file.path, file.name, {
+        acceptRanges: true,
+        cacheControl: false,
+        dotfiles: 'deny',
+        lastModified: false,
+      }, (error) => {
+        if (!error) return;
+        if (response.headersSent) response.destroy(error);
+        else next(error);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post('/api/download', security.requireMutation, security.limitStarts, jsonParser, (request, response) => {
     try {
       parseDownloadRequest(request.body);
@@ -89,7 +132,7 @@ export async function createApplication({ jobs: suppliedJobs, tools, port = PORT
       const conflict = /already downloading|already in use/i.test(error.publicMessage || error.message);
       jsonError(response, conflict ? 409 : 503, conflict
         ? (error.publicMessage || 'A playlist is already downloading.')
-        : 'The local download service could not start this job.');
+        : 'The download service could not start this job.');
     }
   });
 
@@ -209,8 +252,8 @@ export async function createApplication({ jobs: suppliedJobs, tools, port = PORT
       jsonError(response, 400, 'The JSON request body is malformed.');
       return;
     }
-    console.error('Unhandled local service error:', error);
-    jsonError(response, 500, 'The local download service hit an unexpected error.');
+    console.error('Unhandled download service error:', error);
+    jsonError(response, 500, 'The download service hit an unexpected error.');
   });
 
   const closeStreams = () => {
