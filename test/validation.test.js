@@ -33,9 +33,18 @@ test('rejects control characters and oversized URLs', () => {
 
 test('accepts only the supported request schema and quality profiles', () => {
   assert.equal(parseDownloadRequest({ url: MUSIC_URL }).quality, DEFAULT_QUALITY);
+  assert.deepEqual(
+    (({ startIndex, batchSize, endIndex }) => ({ startIndex, batchSize, endIndex }))(
+      parseDownloadRequest({ url: MUSIC_URL, startIndex: 21, batchSize: 20 }),
+    ),
+    { startIndex: 21, batchSize: 20, endIndex: 40 },
+  );
   assert.equal(parseDownloadRequest({ url: MUSIC_URL, quality: '1080' }).quality, '1080');
   assert.equal(parseDownloadRequest({ url: MUSIC_URL, quality: '720' }).quality, '720');
   assert.throws(() => parseDownloadRequest({ url: MUSIC_URL, quality: 'audio' }), /supported download format/);
+  assert.throws(() => parseDownloadRequest({ url: MUSIC_URL, startIndex: 0, batchSize: 20 }), /batch start/);
+  assert.throws(() => parseDownloadRequest({ url: MUSIC_URL, startIndex: 1, batchSize: 21 }), /batch size/);
+  assert.throws(() => parseDownloadRequest({ url: MUSIC_URL, startIndex: '21', batchSize: 20 }), /batch start/);
   assert.throws(() => parseDownloadRequest({ url: MUSIC_URL, destination: 'C:\\' }), /unsupported field/);
   assert.throws(() => parseDownloadRequest(null), /JSON request body/);
 });

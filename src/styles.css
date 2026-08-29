@@ -383,11 +383,83 @@ select {
 
 .options-row {
   display: grid;
-  grid-template-columns: minmax(180px, 0.75fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(165px, 0.8fr) minmax(110px, 0.5fr) minmax(0, 1.2fr);
   gap: 12px;
   margin-top: 15px;
   padding-top: 15px;
   border-top: 1px solid var(--border);
+}
+
+.batch-navigation {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+
+.batch-navigation__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.batch-navigation__heading span:first-child {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.batch-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 7px;
+}
+
+.batch-option {
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--inset);
+  color: var(--text);
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.batch-option:hover:not(:disabled),
+.batch-option[data-state="running"],
+.batch-option[data-state="retry"] {
+  border-color: var(--text-high);
+  color: var(--text-high);
+}
+
+.batch-option[data-state="selected"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.batch-option[data-state="done"] {
+  border-style: double;
+  border-color: var(--text-mid);
+  color: var(--text-high);
+}
+
+.batch-option small {
+  color: inherit;
+  font-size: 7px;
+  letter-spacing: 0.05em;
 }
 
 .config-note {
@@ -508,6 +580,8 @@ select {
 .queue-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 12px;
 }
 

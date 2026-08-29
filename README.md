@@ -10,6 +10,7 @@ An independent, secure, and resumable UI and orchestration layer for [`yt-dlp`](
 
 - Best available, 1080p, and 720p quality profiles
 - Live speed, ETA, item, pass, and total progress over SSE
+- Selectable playlist batches with original item numbers and completed-range tracking
 - Collapsible queue that appears only after a playlist URL is entered
 - Resume-aware retries, archive tracking, and final media verification
 - Configurable storage, app identity, quality, resource limits, ports, and tool paths
@@ -53,6 +54,9 @@ Copy [`.env.example`](.env.example) to `.env`. All settings are optional and hav
 | --- | --- | --- |
 | `APP_NAME` | `Playlist Downloader` | Name shown in the UI and page title |
 | `DEFAULT_QUALITY` | `best` | `best`, `1080`, or `720` |
+| `MAX_PLAYLIST_ITEMS` | `500` | Highest playlist position that can be selected |
+| `MAX_BATCH_ITEMS` | `20` | Maximum videos processed in one download job |
+| `MAX_TOTAL_DURATION_SECONDS` | `259200` | Maximum known media duration allowed in one batch |
 | `PLAYLIST_DOWNLOADS_ROOT` | `<app>/downloads` | Absolute persistent output directory |
 | `PORT` / `DEV_PORT` | `4173` / `5173` | Backend and Vite development ports |
 | `APP_PUBLIC_URL` | empty | Exact HTTPS reverse-proxy origin for hosted use |

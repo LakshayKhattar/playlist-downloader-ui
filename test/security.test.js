@@ -212,6 +212,8 @@ test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs
     id: '00000000-0000-4000-8000-000000000000',
     status: 'downloading', message: 'Downloading playlist', playlistTitle: 'List', totalItems: 1,
     completedItems: 0, overallPercent: 10, pass: 1, destination: 'downloads\\PL1234567890', quality: 'best',
+    batch: { start: 21, end: 40, requestedSize: 20, hasMore: true, nextStart: 41, unavailableCount: 0 },
+    completedBatches: [{ start: 1, end: 20 }],
     current: { index: 1, title: 'Track', percent: 10, speed: '1 MiB/s', eta: '10' },
     items: [{ id: 'abcdefghijk', index: 1, title: 'Track', status: 'downloading', percent: 10, speed: '', eta: '' }],
     files: [
@@ -232,6 +234,8 @@ test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs
   assert.equal('outputDirectory' in publicJob, false);
   assert.equal('log' in publicJob, false);
   assert.equal('id' in publicJob.items[0], false);
+  assert.deepEqual(publicJob.batch, { start: 21, end: 40, requestedSize: 20, hasMore: true, nextStart: 41, unavailableCount: 0 });
+  assert.deepEqual(publicJob.completedBatches, [{ start: 1, end: 20 }]);
   assert.equal(publicJob.files[0].name, '001 - Track.mkv');
   assert.equal(publicJob.files[0].index, 1);
   assert.equal(publicJob.files[0].downloadUrl, '/api/jobs/00000000-0000-4000-8000-000000000000/files/0');
@@ -342,6 +346,7 @@ test('HTTP boundary blocks hostile hosts/origins and requires a launch token bef
   assert.deepEqual(configBody.formats.map(({ value }) => value), ['best', '1080', '720']);
   assert.equal(path.isAbsolute(configBody.destinationRoot), false);
   assert.ok(configBody.limits.maxPlaylistItems > 0);
+  assert.ok(configBody.limits.maxBatchItems > 0);
 
   const event = await firstServerEvent(port, snapshot.id);
   assert.equal(event.status, 200);

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { DEFAULT_QUALITY } from './config.js';
+import { DEFAULT_QUALITY, MAX_BATCH_ITEMS, MAX_PLAYLIST_ITEMS } from './config.js';
 import { isQualityProfile } from './quality.js';
 
 const ALLOWED_HOSTS = new Set([
@@ -49,7 +49,7 @@ export function parseDownloadRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('A JSON request body is required.');
   }
-  if (Object.keys(body).some((key) => !['url', 'quality'].includes(key))) {
+  if (Object.keys(body).some((key) => !['url', 'quality', 'startIndex', 'batchSize'].includes(key))) {
     throw new Error('The request contains an unsupported field.');
   }
   const playlist = parsePlaylistUrl(body.url);
@@ -57,7 +57,16 @@ export function parseDownloadRequest(body) {
   if (!isQualityProfile(quality)) {
     throw new Error('Choose a supported download format.');
   }
-  return { ...playlist, quality };
+  const startIndex = body.startIndex ?? 1;
+  const requestedBatchSize = body.batchSize ?? MAX_BATCH_ITEMS;
+  if (!Number.isSafeInteger(startIndex) || startIndex < 1 || startIndex > MAX_PLAYLIST_ITEMS) {
+    throw new Error(`Choose a batch start between 1 and ${MAX_PLAYLIST_ITEMS}.`);
+  }
+  if (!Number.isSafeInteger(requestedBatchSize) || requestedBatchSize < 1 || requestedBatchSize > MAX_BATCH_ITEMS) {
+    throw new Error(`Choose a batch size between 1 and ${MAX_BATCH_ITEMS}.`);
+  }
+  const endIndex = Math.min(MAX_PLAYLIST_ITEMS, startIndex + requestedBatchSize - 1);
+  return { ...playlist, quality, startIndex, batchSize: endIndex - startIndex + 1, endIndex };
 }
 
 export function safeFolderName(value) {

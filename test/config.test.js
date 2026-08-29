@@ -79,3 +79,12 @@ test('remote binding fails closed unless origin and authentication are configure
   });
   assert.equal(configured.status, 0, configured.stderr);
 });
+
+test('batch size cannot exceed the configured playlist boundary', () => {
+  const invalidBatchLimit = importConfig({
+    MAX_PLAYLIST_ITEMS: '10',
+    MAX_BATCH_ITEMS: '20',
+  });
+  assert.notEqual(invalidBatchLimit.status, 0);
+  assert.match(invalidBatchLimit.stderr, /MAX_BATCH_ITEMS/);
+});

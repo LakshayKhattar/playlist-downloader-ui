@@ -16,6 +16,7 @@ import {
   DEV_PORT,
   DOWNLOADS_LABEL,
   HOST,
+  MAX_BATCH_ITEMS,
   MAX_DOWNLOAD_BYTES,
   MAX_PLAYLIST_ITEMS,
   MAX_SSE_CLIENTS,
@@ -75,6 +76,7 @@ export async function createApplication({ jobs: suppliedJobs, tools, port = PORT
       formats: publicQualityOptions(),
       limits: {
         maxPlaylistItems: MAX_PLAYLIST_ITEMS,
+        maxBatchItems: MAX_BATCH_ITEMS,
         maxTotalDurationHours: MAX_TOTAL_DURATION_SECONDS / 3600,
         maxDownloadGiB: MAX_DOWNLOAD_BYTES / (1024 ** 3),
       },

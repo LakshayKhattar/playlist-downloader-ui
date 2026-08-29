@@ -96,6 +96,7 @@ function normalizeItems(job) {
       return {
         key: item.id || item.name || `${offset}-${item.index || ''}`,
         index: Number(item.index || item.playlistIndex || offset + 1),
+        position: Number(item.batchPosition || offset + 1),
         title: item.filename || item.name || item.title || item.id || 'Playlist item',
         state: displayState(item.status || item.state),
         percent,
@@ -110,6 +111,7 @@ function normalizeItems(job) {
   const normalized = files.map((file, offset) => ({
     key: file.id || file.name || `file-${offset}`,
     index: Number(file.index || offset + 1),
+    position: offset + 1,
     title: file.name || file.title || file.id || 'Downloaded item',
     state: displayState(file.verified === false ? 'failed' : file.verified ? 'done' : 'checking'),
     percent: file.verified === false ? 100 : clampPercent(file.percent, 100),
@@ -125,6 +127,7 @@ function normalizeItems(job) {
     const current = {
       key: currentKey,
       index: Number(job.current.index || normalized.length + 1),
+      position: normalized.length + 1,
       title: job.current.filename || job.current.title || job.current.id,
       state: displayState(job.status === 'verifying' ? 'verifying' : job.status),
       percent: clampPercent(job.current.percent, 0),
@@ -216,8 +219,8 @@ function ErrorBanner({ title, children }) {
 
 function QueueRow({ item, total }) {
   const percent = clampPercent(item.percent, item.state.key === 'done' ? 100 : 0);
-  const position = String(item.index || 0).padStart(String(Math.max(total, 1)).length, '0');
-  const meta = [item.state.label, item.speed, item.eta ? `ETA ${item.eta}` : '', item.size].filter(Boolean);
+  const position = String(item.position || 0).padStart(String(Math.max(total, 1)).length, '0');
+  const meta = [`PLAYLIST #${item.index}`, item.state.label, item.speed, item.eta ? `ETA ${item.eta}` : '', item.size].filter(Boolean);
 
   return (
     <li className="queue-row" data-state={item.state.key}>
@@ -237,12 +240,13 @@ function QueueRow({ item, total }) {
   );
 }
 
-function QueuePanel({ job, onCancel, cancelling, expanded, onToggle }) {
+function QueuePanel({ job, onCancel, cancelling, expanded, onToggle, onSelectNextBatch, nextBatchLabel }) {
   const items = useMemo(() => normalizeItems(job), [job]);
   const active = ACTIVE_STATES.has(job?.status);
   const total = Number(job?.totalItems) || items.length;
   const overall = clampPercent(job?.overallPercent, total ? (Number(job?.completedItems || 0) / total) * 100 : 0);
   const queueStatus = job?.status ? String(job.status).toUpperCase() : 'IDLE';
+  const batchLabel = job?.batch ? `${job.batch.start}-${job.batch.end}` : null;
 
   return (
     <section className="queue-panel" aria-labelledby="queue-title" data-collapsed={!expanded}>
@@ -255,7 +259,7 @@ function QueuePanel({ job, onCancel, cancelling, expanded, onToggle }) {
           onClick={onToggle}
         >
           <span>
-            <span className="panel-label">QUEUE / {queueStatus}</span>
+            <span className="panel-label">QUEUE{batchLabel ? ` / BATCH ${batchLabel}` : ''} / {queueStatus}</span>
             <span className="queue-title" id="queue-title" role="heading" aria-level="2">Download queue</span>
           </span>
           <span className="queue-toggle__mark" aria-hidden="true">{expanded ? '-' : '+'}</span>
@@ -267,6 +271,11 @@ function QueuePanel({ job, onCancel, cancelling, expanded, onToggle }) {
               {cancelling ? 'Stopping...' : 'Cancel'}
             </button>
           )}
+          {job?.status === 'completed' && job.batch?.hasMore && (
+            <button className="secondary-button" type="button" onClick={onSelectNextBatch}>
+              Select {nextBatchLabel}
+            </button>
+          )}
         </div>
       </div>
 
@@ -274,7 +283,7 @@ function QueuePanel({ job, onCancel, cancelling, expanded, onToggle }) {
         {job && total > 0 && (
           <div className="overall-progress">
             <div>
-              <span>Overall</span>
+              <span>{batchLabel ? `Batch ${batchLabel}` : 'Overall'}</span>
               <span>{Math.round(overall)}%</span>
             </div>
             <progress max="100" value={overall} aria-label={`Overall progress: ${Math.round(overall)} percent`} />
@@ -307,6 +316,8 @@ export default function App() {
   const [theme, setTheme] = useState(initialTheme);
   const [url, setUrl] = useState('');
   const [quality, setQuality] = useState('best');
+  const [batchStart, setBatchStart] = useState(1);
+  const [batchSize, setBatchSize] = useState(20);
   const [config, setConfig] = useState(null);
   const [job, setJob] = useState(null);
   const [serviceState, setServiceState] = useState('checking');
@@ -322,9 +333,25 @@ export default function App() {
   const inputRef = useRef(null);
   const previousStatusRef = useRef('');
   const qualityInitializedRef = useRef(false);
+  const batchInitializedRef = useRef(false);
 
   const active = ACTIVE_STATES.has(job?.status);
   const formats = useMemo(() => normalizeFormats(config?.formats), [config?.formats]);
+  const maxPlaylistItems = Number(config?.limits?.maxPlaylistItems) || 1;
+  const maxBatchItems = Number(config?.limits?.maxBatchItems) || 20;
+  const batchSizes = useMemo(() => {
+    const sizes = [5, 10, 20].filter((size) => size <= maxBatchItems);
+    if (!sizes.includes(maxBatchItems)) sizes.push(maxBatchItems);
+    return [...new Set(sizes)].sort((left, right) => left - right);
+  }, [maxBatchItems]);
+  const batchOptions = useMemo(() => {
+    const options = [];
+    for (let start = 1; start <= maxPlaylistItems; start += batchSize) {
+      options.push({ start, end: Math.min(maxPlaylistItems, start + batchSize - 1) });
+    }
+    return options;
+  }, [batchSize, maxPlaylistItems]);
+  const selectedBatch = batchOptions.find((batch) => batch.start === batchStart) || batchOptions[0];
   const destination = job?.destination || config?.destinationRoot || 'downloads';
   const appName = config?.appName || 'Playlist Downloader';
   const queueVisible = Boolean(url.trim() || job);
@@ -336,6 +363,11 @@ export default function App() {
     if (!qualityInitializedRef.current && next.defaultQuality) {
       setQuality(next.defaultQuality);
       qualityInitializedRef.current = true;
+    }
+    if (!batchInitializedRef.current && next.limits?.maxBatchItems) {
+      setBatchSize(next.limits.maxBatchItems);
+      setBatchStart(1);
+      batchInitializedRef.current = true;
     }
     setServiceState('online');
     return next;
@@ -419,6 +451,12 @@ export default function App() {
   }, [active]);
 
   useEffect(() => {
+    if (batchStart > maxPlaylistItems || !batchOptions.some((batch) => batch.start === batchStart)) {
+      setBatchStart(batchOptions[0]?.start || 1);
+    }
+  }, [batchOptions, batchStart, maxPlaylistItems]);
+
+  useEffect(() => {
     let live = true;
     Promise.all([loadBootstrap(), fetchCurrentJob()])
       .then(([, current]) => {
@@ -470,7 +508,9 @@ export default function App() {
     setSubmitting(true);
     setQueueExpanded(true);
     try {
-      const payload = await apiMutation('/api/download', { url: url.trim(), quality });
+      const payload = await apiMutation('/api/download', {
+        url: url.trim(), quality, startIndex: selectedBatch.start, batchSize,
+      });
       if (!payload.job?.id) throw new Error('The local service did not create a download job.');
       setJob(payload.job);
       setServiceState('online');
@@ -496,8 +536,27 @@ export default function App() {
     }
   }
 
+  function selectBatch(start) {
+    setBatchStart(start);
+    setActionError('');
+    setAnnouncement(`Batch starting at playlist item ${start} selected.`);
+  }
+
+  function selectNextBatch() {
+    const nextStart = Number(job?.batch?.nextStart);
+    if (!Number.isSafeInteger(nextStart)) return;
+    selectBatch(nextStart);
+    document.querySelector('.download-panel')?.scrollIntoView({ behavior: 'auto', block: 'center' });
+  }
+
   const formDisabled = active || submitting;
-  const buttonText = submitting || job?.status === 'preparing' ? 'Starting...' : active ? 'Download running' : 'Download playlist';
+  const selectedBatchLabel = `${selectedBatch?.start || 1}-${selectedBatch?.end || batchSize}`;
+  const nextBatchEnd = Math.min(maxPlaylistItems, Number(job?.batch?.nextStart || 1) + batchSize - 1);
+  const nextBatchLabel = `${job?.batch?.nextStart || 1}-${nextBatchEnd}`;
+  const buttonText = submitting || job?.status === 'preparing'
+    ? 'Starting...'
+    : active ? 'Download running' : `Download batch ${selectedBatchLabel}`;
+  const completedBatchKeys = new Set((job?.completedBatches || []).map((batch) => `${batch.start}-${batch.end}`));
 
   return (
     <div className="app-shell">
@@ -568,14 +627,66 @@ export default function App() {
                 {formats.map((format) => <option key={format.value} value={format.value}>{format.label}</option>)}
               </select>
             </div>
+            <div className="field-group">
+              <label htmlFor="batch-size">Batch size</label>
+              <select
+                id="batch-size"
+                value={batchSize}
+                disabled={formDisabled}
+                onChange={(event) => {
+                  setBatchSize(Number(event.target.value));
+                  setBatchStart(1);
+                  setActionError('');
+                }}
+              >
+                {batchSizes.map((size) => <option key={size} value={size}>{size} videos</option>)}
+              </select>
+            </div>
             <div className="field-group destination-field">
               <label htmlFor="download-destination">Destination</label>
               <input id="download-destination" type="text" value={destination} readOnly aria-readonly="true" />
             </div>
           </div>
+          <div className="batch-navigation" aria-labelledby="batch-navigation-title">
+            <div className="batch-navigation__heading">
+              <span id="batch-navigation-title">Playlist batches</span>
+              <span>Choose one range at a time</span>
+            </div>
+            <div className="batch-options">
+              {batchOptions.map((batch) => {
+                const key = `${batch.start}-${batch.end}`;
+                const isCurrent = Number(job?.batch?.start) === batch.start;
+                const state = completedBatchKeys.has(key) || (isCurrent && job?.status === 'completed')
+                  ? 'done'
+                  : isCurrent && active
+                    ? 'running'
+                    : isCurrent && job?.status === 'failed'
+                      ? 'retry'
+                      : batchStart === batch.start ? 'selected' : 'queued';
+                const stateLabel = {
+                  done: 'DONE', running: 'RUN', retry: 'RETRY', selected: 'SELECTED', queued: 'WAIT',
+                }[state];
+                return (
+                  <button
+                    className="batch-option"
+                    data-state={state}
+                    key={key}
+                    type="button"
+                    disabled={formDisabled}
+                    aria-pressed={batchStart === batch.start}
+                    aria-label={`Playlist items ${batch.start} through ${batch.end}: ${stateLabel.toLowerCase()}`}
+                    onClick={() => selectBatch(batch.start)}
+                  >
+                    <span>{batch.start}-{batch.end}</span>
+                    <small>{stateLabel}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           {config?.limits && (
             <p className="config-note">
-              Up to {config.limits.maxPlaylistItems} videos per playlist / {config.limits.maxDownloadGiB} GiB total safety limit
+              Up to {config.limits.maxPlaylistItems} videos / {config.limits.maxBatchItems} per batch / {config.limits.maxTotalDurationHours}h and {config.limits.maxDownloadGiB} GiB safety limits
             </p>
           )}
         </form>
@@ -595,6 +706,8 @@ export default function App() {
             cancelling={cancelling}
             expanded={queueExpanded}
             onToggle={() => setQueueExpanded((value) => !value)}
+            onSelectNextBatch={selectNextBatch}
+            nextBatchLabel={nextBatchLabel}
           />
         )}
         <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>

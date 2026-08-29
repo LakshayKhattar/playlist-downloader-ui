@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createLineReader, parseDownloaderLine } from '../server/progress.js';
 import { runCapture, runStreaming } from '../server/processes.js';
-import { buildDownloadArgs, idFromFilename, indexFromFilename } from '../server/job-manager.js';
+import { buildDownloadArgs, buildPreflightArgs, idFromFilename, indexFromFilename, JobManager } from '../server/job-manager.js';
 
 test('parses validated JSON item, progress, postprocess, and file markers', () => {
   assert.deepEqual(
@@ -125,6 +125,8 @@ test('download arguments preserve failure signals and final MKV output', () => {
     url: 'https://www.youtube.com/playlist?list=PL1234567890',
     outputDirectory: 'C:\\Downloads',
     archivePath: 'C:\\Downloads\\.download-archive.txt',
+    startIndex: 21,
+    endIndex: 40,
   });
   assert.ok(args.includes('--no-abort-on-error'));
   assert.ok(args.includes('--abort-on-unavailable-fragments'));
@@ -132,7 +134,24 @@ test('download arguments preserve failure signals and final MKV output', () => {
   assert.ok(args.includes('--no-remote-components'));
   assert.ok(args.includes('--remux-video'));
   assert.ok(!args.includes('--ignore-errors'));
+  assert.equal(args[args.indexOf('--playlist-start') + 1], '21');
+  assert.equal(args[args.indexOf('--playlist-end') + 1], '40');
+  assert.equal(args[args.indexOf('--max-downloads') + 1], '20');
   assert.match(args[args.indexOf('--output') + 1], /%\(playlist_index\)03d - \[%\(id\)s\]/);
+});
+
+test('preflight probes one item beyond a bounded batch and progress uses batch positions', () => {
+  const args = buildPreflightArgs('https://www.youtube.com/playlist?list=PL1234567890', {
+    startIndex: 21,
+    endIndex: 40,
+  });
+  assert.equal(args[args.indexOf('--playlist-start') + 1], '21');
+  assert.equal(args[args.indexOf('--playlist-end') + 1], '41');
+
+  const jobs = Object.create(JobManager.prototype);
+  jobs.job = { items: [{ id: 'abcdefghijk', index: 21 }, { id: 'lmnopqrstuv', index: 22 }] };
+  assert.equal(jobs.batchPosition({ index: 21 }), 1);
+  assert.equal(jobs.batchPosition({ id: 'lmnopqrstuv' }), 2);
 });
 
 test('media identity survives new names and resumes legacy truncated names by playlist index', () => {

@@ -40,26 +40,23 @@ function cleanText(value, fallback = '') {
   return text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
-function uniqueEntries(entries = []) {
+function uniqueEntries(entries = [], fallbackStart = 1) {
   const found = new Set();
-  return entries
-    .filter((entry) => entry && VIDEO_ID.test(entry.id || ''))
-    .filter((entry) => {
-      if (found.has(entry.id)) return false;
-      found.add(entry.id);
-      return true;
-    })
-    .map((entry, offset) => ({
+  return entries.flatMap((entry, offset) => {
+    if (!entry || !VIDEO_ID.test(entry.id || '') || found.has(entry.id)) return [];
+    found.add(entry.id);
+    return [{
       id: entry.id,
       index: Number.isSafeInteger(Number(entry.playlist_index))
         ? Math.max(1, Number(entry.playlist_index))
-        : offset + 1,
+        : fallbackStart + offset,
       title: cleanText(entry.title, entry.id),
       duration: Number.isFinite(Number(entry.duration)) && Number(entry.duration) >= 0
         ? Number(entry.duration)
         : null,
       live: Boolean(entry.is_live) || ['is_live', 'is_upcoming'].includes(entry.live_status),
-    }));
+    }];
+  });
 }
 
 export function idFromFilename(filename) {
@@ -85,7 +82,8 @@ export function publicFileName(name) {
     .slice(0, 240) || 'Downloaded file';
 }
 
-function buildPreflightArgs(url) {
+export function buildPreflightArgs(url, { startIndex = 1, endIndex = MAX_PLAYLIST_ITEMS } = {}) {
+  const probeEnd = Math.min(MAX_PLAYLIST_ITEMS, endIndex + 1);
   return [
     '--ignore-config',
     '--flat-playlist',
@@ -98,12 +96,21 @@ function buildPreflightArgs(url) {
     '--no-remote-components',
     '--no-plugin-dirs',
     '--ies', 'youtube:tab,youtube',
-    '--playlist-end', String(MAX_PLAYLIST_ITEMS + 1),
+    '--playlist-start', String(startIndex),
+    '--playlist-end', String(probeEnd),
     url,
   ];
 }
 
-export function buildDownloadArgs({ url, outputDirectory, archivePath, quality = 'best', ffmpegPath }) {
+export function buildDownloadArgs({
+  url,
+  outputDirectory,
+  archivePath,
+  quality = 'best',
+  ffmpegPath,
+  startIndex = 1,
+  endIndex = MAX_PLAYLIST_ITEMS,
+}) {
   const outputTemplate = path.join(
     outputDirectory,
     '%(playlist_index)03d - [%(id)s] %(title).140B.%(ext)s',
@@ -114,7 +121,9 @@ export function buildDownloadArgs({ url, outputDirectory, archivePath, quality =
   const args = [
     '--ignore-config', '--yes-playlist', '--concat-playlist', 'never', '--no-simulate', '--continue',
     '--no-overwrites', '--no-abort-on-error', '--abort-on-unavailable-fragments', '--check-formats',
-    '--match-filter', '!is_live', '--max-downloads', String(MAX_PLAYLIST_ITEMS),
+    '--match-filter', '!is_live',
+    '--playlist-start', String(startIndex), '--playlist-end', String(endIndex),
+    '--max-downloads', String(Math.max(1, endIndex - startIndex + 1)),
     '--max-filesize', String(MAX_SINGLE_FILE_BYTES), '--retries', '20', '--fragment-retries', '20',
     '--extractor-retries', '10', '--file-access-retries', '10',
     '--retry-sleep', 'http:exp=1:20', '--retry-sleep', 'fragment:exp=1:20',
@@ -175,11 +184,12 @@ async function listMediaFiles(outputDirectory) {
   return files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
-async function listPartialFiles(outputDirectory) {
+async function listPartialFiles(outputDirectory, expectedIndexes = null) {
   const entries = await fs.readdir(outputDirectory, { withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile() && !entry.isSymbolicLink())
     .filter((entry) => /\.part(?:$|-)/i.test(entry.name) || /\.ytdl$/i.test(entry.name))
+    .filter((entry) => !expectedIndexes || expectedIndexes.has(indexFromFilename(entry.name)))
     .map((entry) => entry.name);
 }
 
@@ -263,7 +273,9 @@ async function readArchiveIds(archivePath, outputDirectory) {
 async function assessOutput(outputDirectory, expected, archivePath, tools, signal) {
   const expectedById = new Map(expected.map((entry) => [entry.id, entry]));
   const expectedByIndex = new Map(expected.map((entry) => [entry.index, entry]));
-  const files = await listMediaFiles(outputDirectory);
+  const files = (await listMediaFiles(outputDirectory)).filter((file) => (
+    expectedById.has(file.id) || expectedByIndex.has(file.index)
+  ));
   const inspected = [];
   const validIds = new Set();
   for (const file of files) {
@@ -277,7 +289,7 @@ async function assessOutput(outputDirectory, expected, archivePath, tools, signa
     inspected.push(result);
   }
   const archiveIds = await readArchiveIds(archivePath, outputDirectory);
-  const partialFiles = await listPartialFiles(outputDirectory);
+  const partialFiles = await listPartialFiles(outputDirectory, new Set(expectedByIndex.keys()));
   return {
     inspected,
     validIds,
@@ -321,6 +333,15 @@ export function toPublicJob(job) {
     pass: job.pass,
     destination: job.destination,
     quality: job.quality,
+    batch: job.batch ? {
+      start: job.batch.start,
+      end: job.batch.end,
+      requestedSize: job.batch.requestedSize,
+      hasMore: job.batch.hasMore,
+      nextStart: job.batch.nextStart,
+      unavailableCount: job.batch.unavailableCount,
+    } : null,
+    completedBatches: (job.completedBatches || []).map(({ start, end }) => ({ start, end })),
     current: job.current,
     items: job.items.map(({ id: _id, ...item }) => item),
     files: publicFiles,
@@ -349,6 +370,7 @@ export class JobManager {
     this.runPromise = null;
     this.lockPath = null;
     this.resourceError = null;
+    this.completedBatches = new Map();
   }
 
   async initialize() {
@@ -411,7 +433,7 @@ export class JobManager {
     if (this.runPromise || (this.job && ACTIVE_STATES.has(this.job.status))) {
       throw new PublicJobError('A playlist is already downloading.');
     }
-    const { url, playlistId, quality } = parseDownloadRequest(requestBody);
+    const { url, playlistId, quality, startIndex, batchSize, endIndex } = parseDownloadRequest(requestBody);
     const folder = safeFolderName(playlistId);
     const outputDirectory = path.join(this.rootReal, folder);
     if (!isPathInside(this.rootReal, outputDirectory)) throw new Error('Unsafe playlist destination.');
@@ -419,6 +441,11 @@ export class JobManager {
       id: randomUUID(), url, playlistId, quality, playlistTitle: '', status: 'preparing',
       message: 'Reading playlist details', totalItems: 0, completedItems: 0, overallPercent: 0,
       destination: `${DOWNLOADS_LABEL}/${folder}`,
+      batch: {
+        start: startIndex, end: endIndex, requestedSize: batchSize,
+        hasMore: null, nextStart: null, unavailableCount: 0,
+      },
+      completedBatches: clone(this.completedBatches.get(playlistId) || []),
       current: { index: 0, title: '', percent: null, speed: '', eta: '' },
       items: [], files: [],
       verification: { status: 'pending', checked: 0, total: 0, valid: 0, invalidCount: 0, missingCount: 0, partialCount: 0 },
@@ -513,7 +540,10 @@ export class JobManager {
     const archivePath = path.join(this.job.outputDirectory, '.download-archive.txt');
     await assertNormalFileIfPresent(archivePath, this.job.outputDirectory);
 
-    const preflight = await runCapture(this.tools.ytDlp, buildPreflightArgs(this.job.url), {
+    const preflight = await runCapture(this.tools.ytDlp, buildPreflightArgs(this.job.url, {
+      startIndex: this.job.batch.start,
+      endIndex: this.job.batch.end,
+    }), {
       timeoutMs: 180_000, maxOutput: 30_000_000, signal: this.abortController.signal,
       cwd: this.job.outputDirectory,
     });
@@ -528,26 +558,35 @@ export class JobManager {
     }
 
     const rawEntries = Array.isArray(playlist.entries) ? playlist.entries : [];
-    if (rawEntries.length > MAX_PLAYLIST_ITEMS) throw new PublicJobError(`This playlist exceeds the ${MAX_PLAYLIST_ITEMS}-item safety limit.`);
-    const unavailableCount = rawEntries.filter((entry) => !entry || !VIDEO_ID.test(entry.id || '')).length;
-    if (unavailableCount > 0) {
-      throw new PublicJobError(`${unavailableCount} playlist item${unavailableCount === 1 ? ' is' : 's are'} unavailable. Nothing was downloaded.`);
-    }
-    const expected = uniqueEntries(rawEntries);
-    if (!expected.length) throw new PublicJobError('No downloadable videos were found in this playlist.');
+    const batchEntries = rawEntries.slice(0, this.job.batch.requestedSize);
+    const unavailableCount = batchEntries.filter((entry) => !entry || !VIDEO_ID.test(entry.id || '')).length;
+    const expected = uniqueEntries(batchEntries, this.job.batch.start);
+    if (!expected.length) throw new PublicJobError('No downloadable videos were found in this batch range.');
     if (expected.some((entry) => entry.live)) throw new PublicJobError('Live or upcoming streams cannot be downloaded by this app.');
     const knownDuration = expected.reduce((total, entry) => total + (entry.duration || 0), 0);
     if (knownDuration > MAX_TOTAL_DURATION_SECONDS) {
-      throw new PublicJobError(`This playlist exceeds the configured ${MAX_TOTAL_DURATION_SECONDS / 3600}-hour duration limit.`);
+      throw new PublicJobError(`This batch exceeds the ${MAX_TOTAL_DURATION_SECONDS / 3600}-hour duration limit. Select a smaller batch size and retry.`);
     }
+    const fallbackEnd = this.job.batch.start + batchEntries.length - 1;
+    const lastKnownIndex = expected.reduce((maximum, entry) => Math.max(maximum, entry.index), 0);
+    const actualEnd = Math.min(this.job.batch.end, Math.max(this.job.batch.start, fallbackEnd, lastKnownIndex));
+    const hasMore = actualEnd < MAX_PLAYLIST_ITEMS && rawEntries.length > batchEntries.length;
 
     this.update({
       playlistTitle: cleanText(playlist.title || playlist.playlist_title, 'YouTube playlist'),
       totalItems: expected.length,
-      items: expected.map((entry) => ({
-        index: entry.index, id: entry.id, title: entry.title, status: 'queued', percent: 0, speed: '', eta: '',
+      batch: {
+        ...this.job.batch,
+        end: actualEnd,
+        hasMore,
+        nextStart: hasMore ? actualEnd + 1 : null,
+        unavailableCount,
+      },
+      items: expected.map((entry, offset) => ({
+        index: entry.index, batchPosition: offset + 1, id: entry.id,
+        title: entry.title, status: 'queued', percent: 0, speed: '', eta: '',
       })),
-      message: `Found ${expected.length} items`,
+      message: `Batch ${this.job.batch.start}-${actualEnd}: ${expected.length} downloadable item${expected.length === 1 ? '' : 's'}${unavailableCount ? `; ${unavailableCount} unavailable skipped` : ''}`,
     });
 
     let missing = new Set(expected.map((entry) => entry.id));
@@ -607,6 +646,8 @@ export class JobManager {
         archivePath,
         quality: this.job.quality,
         ffmpegPath: this.tools.ffmpeg,
+        startIndex: this.job.batch.start,
+        endIndex: this.job.batch.end,
       }), {
         onStdout: (chunk) => stdoutReader.push(chunk),
         onStderr: (chunk) => stderrReader.push(chunk),
@@ -624,6 +665,14 @@ export class JobManager {
     }
   }
 
+  batchPosition(identifier) {
+    const offset = this.job?.items.findIndex((item) => (
+      (identifier.id && item.id === identifier.id)
+      || (identifier.index && item.index === identifier.index)
+    ));
+    return offset >= 0 ? offset + 1 : 1;
+  }
+
   handleLine(line) {
     const event = parseDownloaderLine(line);
     if (!this.job || event.type === 'log') return;
@@ -634,8 +683,9 @@ export class JobManager {
     }
     if (event.type === 'progress') {
       const index = event.index || this.job.current.index || 1;
+      const batchPosition = this.batchPosition(event);
       const percent = event.percent ?? this.job.current.percent ?? 0;
-      const completeBefore = Math.max(0, index - 1);
+      const completeBefore = Math.max(0, batchPosition - 1);
       this.setItem(event, { status: 'downloading', percent, speed: event.speed, eta: event.eta });
       this.update({
         overallPercent: Math.min(99.9, ((completeBefore + percent / 100) / Math.max(1, this.job.totalItems)) * 100),
@@ -649,7 +699,8 @@ export class JobManager {
       return;
     }
     if (event.type === 'done') {
-      const completedItems = Math.max(this.job.completedItems, Math.min(event.index, this.job.totalItems));
+      const batchPosition = this.batchPosition(event);
+      const completedItems = Math.max(this.job.completedItems, Math.min(batchPosition, this.job.totalItems));
       this.setItem(event, { status: 'done', percent: 100, speed: '', eta: '' });
       this.update({
         completedItems,
@@ -678,14 +729,16 @@ export class JobManager {
   }
 
   async verify(expected, archivePath, previousAssessment) {
-    const files = await listMediaFiles(this.job.outputDirectory);
+    const expectedById = new Map(expected.map((entry) => [entry.id, entry]));
+    const expectedByIndex = new Map(expected.map((entry) => [entry.index, entry]));
+    const files = (await listMediaFiles(this.job.outputDirectory)).filter((file) => (
+      expectedById.has(file.id) || expectedByIndex.has(file.index)
+    ));
     this.update({
       status: 'verifying', message: 'Checking every final media file',
       current: { index: 0, title: '', percent: null, speed: '', eta: '' },
       verification: { status: 'running', checked: 0, total: files.length, valid: 0, invalidCount: 0, missingCount: previousAssessment?.missing.length || 0, partialCount: 0 },
     });
-    const expectedById = new Map(expected.map((entry) => [entry.id, entry]));
-    const expectedByIndex = new Map(expected.map((entry) => [entry.index, entry]));
     const inspected = [];
     const validIds = new Set();
     for (const file of files) {
@@ -704,7 +757,7 @@ export class JobManager {
     }
 
     const archiveIds = await readArchiveIds(archivePath, this.job.outputDirectory);
-    const partialFiles = await listPartialFiles(this.job.outputDirectory);
+    const partialFiles = await listPartialFiles(this.job.outputDirectory, new Set(expectedByIndex.keys()));
     const missing = expected.filter((entry) => !validIds.has(entry.id));
     const archiveMissing = expected.filter((entry) => !archiveIds.has(entry.id));
     const invalid = inspected.filter((file) => !file.verified);
@@ -721,8 +774,16 @@ export class JobManager {
       });
       return;
     }
+    const completedBatches = [
+      ...(this.completedBatches.get(this.job.playlistId) || []).filter((batch) => (
+        batch.start !== this.job.batch.start || batch.end !== this.job.batch.end
+      )),
+      { start: this.job.batch.start, end: this.job.batch.end },
+    ].sort((left, right) => left.start - right.start);
+    this.completedBatches.set(this.job.playlistId, completedBatches);
     this.update({
-      status: 'completed', message: 'All files downloaded and verified', completedItems: expected.length,
+      status: 'completed', message: `Batch ${this.job.batch.start}-${this.job.batch.end} downloaded and verified`,
+      completedItems: expected.length, completedBatches,
       overallPercent: 100, error: null,
       verification: { ...this.job.verification, status: 'passed', missingCount: 0, invalidCount: 0, partialCount: 0 },
     });
