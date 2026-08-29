@@ -30,7 +30,7 @@ services:
       - key: DEFAULT_QUALITY
         value: best
       - key: MAX_PLAYLIST_ITEMS
-        value: "20"
+        value: "70"
       - key: MAX_TOTAL_DURATION_SECONDS
         value: "21600"
       - key: MAX_DOWNLOAD_BYTES

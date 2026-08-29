@@ -575,7 +575,7 @@ export default function App() {
           </div>
           {config?.limits && (
             <p className="config-note">
-              {config.limits.maxPlaylistItems} items max / {config.limits.maxDownloadGiB} GiB safety limit
+              Up to {config.limits.maxPlaylistItems} videos per playlist / {config.limits.maxDownloadGiB} GiB total safety limit
             </p>
           )}
         </form>
