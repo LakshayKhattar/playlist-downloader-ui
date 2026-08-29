@@ -89,7 +89,9 @@ npm run test:ui -- "https://www.youtube.com/playlist?list=PLAYLIST_ID"
 
 This app requires a long-running Node process, SSE connections, media executables, and writable storage. It is not compatible with static-only or serverless hosting. The included Render Blueprint uses the free tier and temporary storage; save verified files through the UI before the service resets.
 
-YouTube can reject traffic from shared cloud-provider IP addresses. When yt-dlp detects that condition, the UI reports it directly. A local Docker deployment uses your normal network and is the more reliable free option for media downloads.
+YouTube can reject traffic from shared cloud-provider IP addresses. When yt-dlp detects that condition, the UI stops immediately, reports `YOUTUBE_ACCESS_BLOCKED`, and links to the free local setup instead of repeating a request that cannot succeed from the same IP. A local installation uses your normal network and is the reliable free option for media downloads.
+
+This is an upstream network restriction, not a frontend or queue failure. yt-dlp's [official FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#http-error-429-too-many-requests-or-402-payment-required) explains that an affected IP must be unblocked or replaced; cookies used for a challenge must also originate from the same IP. For that reason, this app does not ask users to upload browser cookies to a public Render service.
 
 - [render.yaml](render.yaml): zero-cost Docker Blueprint for Render
 - [GUIDE.md](GUIDE.md): local staging and same-origin VPS deployment with systemd and Caddy

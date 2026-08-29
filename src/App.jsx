@@ -218,6 +218,32 @@ function ErrorBanner({ title, code, children }) {
   );
 }
 
+function DownloadFailure({ job, repositoryUrl }) {
+  if (job?.status !== 'failed' || !job.error) return null;
+  const accessBlocked = job.errorCode === 'YOUTUBE_ACCESS_BLOCKED';
+  const localSetupUrl = repositoryUrl
+    ? `${repositoryUrl.replace(/\/$/, '')}#quick-start`
+    : 'https://github.com/LakshayKhattar/playlist-downloader-ui#quick-start';
+
+  return (
+    <ErrorBanner title="Download stopped" code={job.errorCode}>
+      {job.error}
+      {accessBlocked && (
+        <span className="error-actions">
+          <a href={localSetupUrl} target="_blank" rel="noreferrer external">Open free local setup</a>
+          <a
+            href="https://github.com/yt-dlp/yt-dlp/wiki/FAQ#http-error-429-too-many-requests-or-402-payment-required"
+            target="_blank"
+            rel="noreferrer external"
+          >
+            Read yt-dlp IP-block guidance
+          </a>
+        </span>
+      )}
+    </ErrorBanner>
+  );
+}
+
 const ACTIVITY_STAGES = [
   { key: 'inspect', label: 'Inspect' },
   { key: 'queue', label: 'Queue' },
@@ -773,7 +799,7 @@ export default function App() {
           </ErrorBanner>
         )}
         {actionError && <ErrorBanner title="The request could not be completed">{actionError}</ErrorBanner>}
-        {job?.status === 'failed' && job.error && <ErrorBanner title="Download stopped" code={job.errorCode}>{job.error}</ErrorBanner>}
+        <DownloadFailure job={job} repositoryUrl={config?.repositoryUrl} />
 
         {queueVisible && (
           <QueuePanel

@@ -18,6 +18,8 @@ npm start
 
 Install `yt-dlp`, `ffmpeg`, and `ffprobe` first, or put their absolute paths in `.env`. Open `http://127.0.0.1:4173`.
 
+Local mode is also the free fallback when YouTube blocks a shared hosting IP. If Render reports `YOUTUBE_ACCESS_BLOCKED`, retrying from that same Render service will not reliably help; start this local instance so yt-dlp uses your normal connection. Do not upload exported browser-cookie files to a public deployment.
+
 In a second PowerShell window:
 
 ```powershell

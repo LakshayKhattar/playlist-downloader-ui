@@ -9,6 +9,7 @@ import {
   idFromFilename,
   indexFromFilename,
   JobManager,
+  shouldRetryDownloaderFailure,
 } from '../server/job-manager.js';
 
 test('parses validated JSON item, progress, postprocess, and file markers', () => {
@@ -163,9 +164,11 @@ test('yt-dlp diagnostics become safe actionable public failures', () => {
     classifyDownloaderFailure('ERROR: Sign in to confirm you are not a bot'),
     {
       code: 'YOUTUBE_ACCESS_BLOCKED',
-      message: 'YouTube blocked this server from accessing the playlist. This commonly affects shared cloud IPs such as free Render services. Retry once; if it repeats, run the app locally where yt-dlp can use your normal connection.',
+      message: 'YouTube rejected this server\'s shared cloud IP before media transfer started. A free Render service cannot reliably repair this response. Run the app locally so yt-dlp uses your normal connection.',
     },
   );
+  assert.equal(shouldRetryDownloaderFailure('YOUTUBE_ACCESS_BLOCKED'), false);
+  assert.equal(shouldRetryDownloaderFailure('NETWORK_FAILURE'), true);
   assert.equal(classifyDownloaderFailure('ERROR: HTTP Error 403: Forbidden').code, 'YOUTUBE_MEDIA_FORBIDDEN');
   assert.equal(classifyDownloaderFailure('ERROR: Requested format is not available').code, 'FORMAT_UNAVAILABLE');
   assert.equal(classifyDownloaderFailure('unexpected extractor failure').code, 'YTDLP_FAILED');

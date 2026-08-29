@@ -672,6 +672,26 @@ select {
   letter-spacing: 0.08em;
 }
 
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+
+.error-actions a {
+  color: var(--text-high);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.error-actions a:hover {
+  color: var(--text);
+}
+
 .queue-panel {
   overflow: hidden;
 }

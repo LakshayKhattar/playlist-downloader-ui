@@ -23,6 +23,7 @@ const FINAL_EXTENSION = '.mkv';
 const MAX_SINGLE_FILE_BYTES = Math.min(20 * 1024 ** 3, MAX_DOWNLOAD_BYTES);
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const MAX_DIAGNOSTIC_LINES = 12;
+const NON_RETRYABLE_DOWNLOAD_CODES = new Set(['YOUTUBE_ACCESS_BLOCKED']);
 
 class PublicJobError extends Error {
   constructor(publicMessage, diagnostic = publicMessage, code = 'DOWNLOAD_FAILED') {
@@ -115,7 +116,7 @@ export function classifyDownloaderFailure(diagnostic, stage = 'download') {
   if (/sign in to confirm|not a bot|login required|cookies (?:for authentication|are required)/i.test(text)) {
     return {
       code: 'YOUTUBE_ACCESS_BLOCKED',
-      message: 'YouTube blocked this server from accessing the playlist. This commonly affects shared cloud IPs such as free Render services. Retry once; if it repeats, run the app locally where yt-dlp can use your normal connection.',
+      message: 'YouTube rejected this server\'s shared cloud IP before media transfer started. A free Render service cannot reliably repair this response. Run the app locally so yt-dlp uses your normal connection.',
     };
   }
   if (/http error 403|forbidden|unable to download video data.*403/i.test(text)) {
@@ -158,6 +159,10 @@ export function classifyDownloaderFailure(diagnostic, stage = 'download') {
     code: 'YTDLP_FAILED',
     message: `yt-dlp could not ${stage === 'inspect' ? 'inspect this playlist' : 'finish this batch'}. Retry once to resume; if it fails again, check the service logs for the yt-dlp error.`,
   };
+}
+
+export function shouldRetryDownloaderFailure(code) {
+  return !NON_RETRYABLE_DOWNLOAD_CODES.has(code);
 }
 
 function downloaderError(diagnostic, stage, exitCode = null) {
@@ -708,6 +713,9 @@ export class JobManager {
         overallPercent: ((expected.length - missing.size) / expected.length) * 100,
       });
       if (!missing.size) break;
+      if (passError instanceof PublicJobError && !shouldRetryDownloaderFailure(passError.publicCode)) {
+        throw passError;
+      }
       if (passError && pass === MAX_DOWNLOAD_PASSES) throw passError;
       if (pass < MAX_DOWNLOAD_PASSES) await preserveInvalidFiles(assessment.inspected, missing, recoveryDirectory, this.rootReal);
     }
