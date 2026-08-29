@@ -206,12 +206,98 @@ function ThemeSwitcher({ theme, onChange }) {
   );
 }
 
-function ErrorBanner({ title, children }) {
+function ErrorBanner({ title, code, children }) {
   return (
     <section className="error-banner" role="alert">
       <div>
         <strong>{title}</strong>
         <p>{children}</p>
+        {code && <span className="error-code">{code}</span>}
+      </div>
+    </section>
+  );
+}
+
+const ACTIVITY_STAGES = [
+  { key: 'inspect', label: 'Inspect' },
+  { key: 'queue', label: 'Queue' },
+  { key: 'download', label: 'Download' },
+  { key: 'verify', label: 'Verify' },
+];
+
+function ActivityPanel({ job, submitting }) {
+  if (!submitting && !job) return null;
+  const status = submitting ? 'submitting' : (job?.status || 'submitting');
+  const terminal = ['completed', 'failed', 'canceled', 'cancelled'].includes(status);
+  const failedStage = Number(job?.totalItems || 0) > 0
+    ? (job?.verification?.status === 'running' ? 3 : 2)
+    : 0;
+  const stageIndex = status === 'failed'
+    ? failedStage
+    : status === 'preparing' || status === 'submitting'
+    ? 0
+    : status === 'downloading' || status === 'retrying' || status === 'canceling' || status === 'cancelling'
+      ? 2
+      : status === 'verifying' ? 3 : status === 'canceled' || status === 'cancelled' ? failedStage : 4;
+  const batch = job?.batch ? `${job.batch.start}-${job.batch.end}` : '1-20';
+  const title = {
+    submitting: 'Sending download request',
+    preparing: 'Inspecting playlist',
+    downloading: `Downloading batch ${batch}`,
+    retrying: `Retrying batch ${batch}`,
+    verifying: `Verifying batch ${batch}`,
+    completed: `Batch ${batch} is ready`,
+    failed: `Batch ${batch} needs attention`,
+    canceling: `Stopping batch ${batch}`,
+    cancelling: `Stopping batch ${batch}`,
+    canceled: `Batch ${batch} stopped`,
+    cancelled: `Batch ${batch} stopped`,
+  }[status] || 'Processing request';
+  const detail = status === 'submitting'
+    ? 'Securely sending your request to the download service.'
+    : (job?.message || 'Preparing the download job.');
+  const overall = clampPercent(job?.overallPercent, 0);
+  const current = Number(job?.completedItems || 0);
+  const total = Number(job?.totalItems || 0);
+  const playlistCount = Number(job?.playlist?.itemCount || 0);
+
+  return (
+    <section className="activity-panel" aria-labelledby="activity-title" aria-busy={!terminal} data-status={status}>
+      <div className="activity-panel__summary">
+        <div>
+          <span className="panel-label">LIVE JOB / {String(status).toUpperCase()}</span>
+          <h2 id="activity-title">{title}</h2>
+          <p>{detail}</p>
+        </div>
+        <div className="activity-panel__count" aria-label={total ? `${current} of ${total} videos complete` : 'Playlist inspection in progress'}>
+          {total ? `${current}/${total}` : 'WORKING'}
+        </div>
+      </div>
+      <div className="activity-stages" aria-label="Download stages">
+        {ACTIVITY_STAGES.map((stage, index) => {
+          const stopped = ['failed', 'canceled', 'cancelled'].includes(status);
+          const state = stopped && index === Math.min(stageIndex, 3)
+            ? 'failed'
+            : index < stageIndex || status === 'completed'
+              ? 'done'
+              : index === stageIndex ? 'active' : 'waiting';
+          return (
+            <div className="activity-stage" data-state={state} key={stage.key}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{stage.label}</strong>
+              <small>{state === 'done' ? 'DONE' : state === 'active' ? 'NOW' : state === 'failed' ? 'STOP' : 'WAIT'}</small>
+            </div>
+          );
+        })}
+      </div>
+      <div className={`activity-progress${!terminal && !total ? ' activity-progress--indeterminate' : ''}`}>
+        <span style={total ? { width: `${overall}%` } : undefined} />
+      </div>
+      <div className="activity-panel__meta">
+        <span>{playlistCount ? `${playlistCount} playlist videos` : 'Counting playlist videos'}</span>
+        {job?.current?.title && <span>Now: {job.current.title}</span>}
+        {job?.current?.speed && <span>{humanSpeed(job.current.speed)}</span>}
+        {job?.current?.eta && <span>ETA {job.current.eta}</span>}
       </div>
     </section>
   );
@@ -297,7 +383,7 @@ function QueuePanel({ job, onCancel, cancelling, expanded, onToggle, onSelectNex
         ) : (
           <div className="queue-empty">
             <span aria-hidden="true">[--]</span>
-            <p>Ready to inspect this playlist after you start the download.</p>
+            <p>{job?.status === 'preparing' ? job.message : 'Ready to inspect this playlist after you start the download.'}</p>
           </div>
         )}
 
@@ -317,7 +403,7 @@ export default function App() {
   const [url, setUrl] = useState('');
   const [quality, setQuality] = useState('best');
   const [batchStart, setBatchStart] = useState(1);
-  const [batchSize, setBatchSize] = useState(20);
+  const [jobUrl, setJobUrl] = useState('');
   const [config, setConfig] = useState(null);
   const [job, setJob] = useState(null);
   const [serviceState, setServiceState] = useState('checking');
@@ -333,25 +419,23 @@ export default function App() {
   const inputRef = useRef(null);
   const previousStatusRef = useRef('');
   const qualityInitializedRef = useRef(false);
-  const batchInitializedRef = useRef(false);
 
   const active = ACTIVE_STATES.has(job?.status);
   const formats = useMemo(() => normalizeFormats(config?.formats), [config?.formats]);
   const maxPlaylistItems = Number(config?.limits?.maxPlaylistItems) || 1;
   const maxBatchItems = Number(config?.limits?.maxBatchItems) || 20;
-  const batchSizes = useMemo(() => {
-    const sizes = [5, 10, 20].filter((size) => size <= maxBatchItems);
-    if (!sizes.includes(maxBatchItems)) sizes.push(maxBatchItems);
-    return [...new Set(sizes)].sort((left, right) => left - right);
-  }, [maxBatchItems]);
+  const jobMatchesInput = !url.trim() || (jobUrl && url.trim() === jobUrl);
+  const inspectedPlaylistItems = jobMatchesInput ? Number(job?.playlist?.itemCount || 0) : 0;
   const batchOptions = useMemo(() => {
     const options = [];
-    for (let start = 1; start <= maxPlaylistItems; start += batchSize) {
-      options.push({ start, end: Math.min(maxPlaylistItems, start + batchSize - 1) });
+    for (let start = 1; start <= inspectedPlaylistItems; start += maxBatchItems) {
+      options.push({ start, end: Math.min(inspectedPlaylistItems, start + maxBatchItems - 1) });
     }
     return options;
-  }, [batchSize, maxPlaylistItems]);
-  const selectedBatch = batchOptions.find((batch) => batch.start === batchStart) || batchOptions[0];
+  }, [inspectedPlaylistItems, maxBatchItems]);
+  const selectedBatch = batchOptions.find((batch) => batch.start === batchStart)
+    || batchOptions[0]
+    || { start: 1, end: Math.min(maxPlaylistItems, maxBatchItems) };
   const destination = job?.destination || config?.destinationRoot || 'downloads';
   const appName = config?.appName || 'Playlist Downloader';
   const queueVisible = Boolean(url.trim() || job);
@@ -363,11 +447,6 @@ export default function App() {
     if (!qualityInitializedRef.current && next.defaultQuality) {
       setQuality(next.defaultQuality);
       qualityInitializedRef.current = true;
-    }
-    if (!batchInitializedRef.current && next.limits?.maxBatchItems) {
-      setBatchSize(next.limits.maxBatchItems);
-      setBatchStart(1);
-      batchInitializedRef.current = true;
     }
     setServiceState('online');
     return next;
@@ -451,10 +530,10 @@ export default function App() {
   }, [active]);
 
   useEffect(() => {
-    if (batchStart > maxPlaylistItems || !batchOptions.some((batch) => batch.start === batchStart)) {
+    if (batchOptions.length && !batchOptions.some((batch) => batch.start === batchStart)) {
       setBatchStart(batchOptions[0]?.start || 1);
     }
-  }, [batchOptions, batchStart, maxPlaylistItems]);
+  }, [batchOptions, batchStart]);
 
   useEffect(() => {
     let live = true;
@@ -509,9 +588,10 @@ export default function App() {
     setQueueExpanded(true);
     try {
       const payload = await apiMutation('/api/download', {
-        url: url.trim(), quality, startIndex: selectedBatch.start, batchSize,
+        url: url.trim(), quality, startIndex: selectedBatch.start,
       });
       if (!payload.job?.id) throw new Error('The local service did not create a download job.');
+      setJobUrl(url.trim());
       setJob(payload.job);
       setServiceState('online');
       connectToJob(payload.job.id);
@@ -550,12 +630,12 @@ export default function App() {
   }
 
   const formDisabled = active || submitting;
-  const selectedBatchLabel = `${selectedBatch?.start || 1}-${selectedBatch?.end || batchSize}`;
-  const nextBatchEnd = Math.min(maxPlaylistItems, Number(job?.batch?.nextStart || 1) + batchSize - 1);
+  const selectedBatchLabel = `${selectedBatch.start}-${selectedBatch.end}`;
+  const nextBatchEnd = Math.min(inspectedPlaylistItems || maxPlaylistItems, Number(job?.batch?.nextStart || 1) + maxBatchItems - 1);
   const nextBatchLabel = `${job?.batch?.nextStart || 1}-${nextBatchEnd}`;
   const buttonText = submitting || job?.status === 'preparing'
-    ? 'Starting...'
-    : active ? 'Download running' : `Download batch ${selectedBatchLabel}`;
+    ? 'Inspecting playlist...'
+    : active ? 'Download in progress' : `${job?.status === 'failed' ? 'Retry' : 'Download'} batch ${selectedBatchLabel}`;
   const completedBatchKeys = new Set((job?.completedBatches || []).map((batch) => `${batch.start}-${batch.end}`));
 
   return (
@@ -601,6 +681,7 @@ export default function App() {
                 aria-describedby={fieldError ? 'playlist-url-error' : undefined}
                 onChange={(event) => {
                   setUrl(event.target.value);
+                  if (!active) setBatchStart(1);
                   if (fieldError) setFieldError('');
                 }}
               />
@@ -628,32 +709,22 @@ export default function App() {
               </select>
             </div>
             <div className="field-group">
-              <label htmlFor="batch-size">Batch size</label>
-              <select
-                id="batch-size"
-                value={batchSize}
-                disabled={formDisabled}
-                onChange={(event) => {
-                  setBatchSize(Number(event.target.value));
-                  setBatchStart(1);
-                  setActionError('');
-                }}
-              >
-                {batchSizes.map((size) => <option key={size} value={size}>{size} videos</option>)}
-              </select>
+              <label htmlFor="batch-size">Batching</label>
+              <input id="batch-size" type="text" value={`Automatic - ${maxBatchItems} videos`} readOnly aria-readonly="true" />
             </div>
             <div className="field-group destination-field">
               <label htmlFor="download-destination">Destination</label>
               <input id="download-destination" type="text" value={destination} readOnly aria-readonly="true" />
             </div>
           </div>
-          <div className="batch-navigation" aria-labelledby="batch-navigation-title">
-            <div className="batch-navigation__heading">
-              <span id="batch-navigation-title">Playlist batches</span>
-              <span>Choose one range at a time</span>
-            </div>
-            <div className="batch-options">
-              {batchOptions.map((batch) => {
+          {batchOptions.length > 0 ? (
+            <div className="batch-navigation" aria-labelledby="batch-navigation-title">
+              <div className="batch-navigation__heading">
+                <span id="batch-navigation-title">Playlist batches</span>
+                <span>{inspectedPlaylistItems} videos / {batchOptions.length} batch{batchOptions.length === 1 ? '' : 'es'}</span>
+              </div>
+              <div className="batch-options">
+                {batchOptions.map((batch) => {
                 const key = `${batch.start}-${batch.end}`;
                 const isCurrent = Number(job?.batch?.start) === batch.start;
                 const state = completedBatchKeys.has(key) || (isCurrent && job?.status === 'completed')
@@ -666,30 +737,35 @@ export default function App() {
                 const stateLabel = {
                   done: 'DONE', running: 'RUN', retry: 'RETRY', selected: 'SELECTED', queued: 'WAIT',
                 }[state];
-                return (
-                  <button
-                    className="batch-option"
-                    data-state={state}
-                    key={key}
-                    type="button"
-                    disabled={formDisabled}
-                    aria-pressed={batchStart === batch.start}
-                    aria-label={`Playlist items ${batch.start} through ${batch.end}: ${stateLabel.toLowerCase()}`}
-                    onClick={() => selectBatch(batch.start)}
-                  >
-                    <span>{batch.start}-{batch.end}</span>
-                    <small>{stateLabel}</small>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      className="batch-option"
+                      data-state={state}
+                      key={key}
+                      type="button"
+                      disabled={formDisabled}
+                      aria-pressed={batchStart === batch.start}
+                      aria-label={`Playlist items ${batch.start} through ${batch.end}: ${stateLabel.toLowerCase()}`}
+                      onClick={() => selectBatch(batch.start)}
+                    >
+                      <span>{batch.start}-{batch.end}</span>
+                      <small>{stateLabel}</small>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          ) : (
+            <p className="batch-pending">Exact 20-video ranges will appear after the playlist is inspected. The final range automatically shortens to the real playlist length.</p>
+          )}
           {config?.limits && (
             <p className="config-note">
-              Up to {config.limits.maxPlaylistItems} videos / {config.limits.maxBatchItems} per batch / {config.limits.maxTotalDurationHours}h and {config.limits.maxDownloadGiB} GiB safety limits
+              Up to {config.limits.maxPlaylistItems} videos / fixed {config.limits.maxBatchItems}-video batches / final batch adjusts automatically / {config.limits.maxDownloadGiB} GiB storage limit
             </p>
           )}
         </form>
+
+        <ActivityPanel job={job} submitting={submitting} />
 
         {serviceState === 'offline' && (
           <ErrorBanner title="Download service unavailable">
@@ -697,7 +773,7 @@ export default function App() {
           </ErrorBanner>
         )}
         {actionError && <ErrorBanner title="The request could not be completed">{actionError}</ErrorBanner>}
-        {job?.status === 'failed' && job.error && <ErrorBanner title="Download stopped">{job.error}</ErrorBanner>}
+        {job?.status === 'failed' && job.error && <ErrorBanner title="Download stopped" code={job.errorCode}>{job.error}</ErrorBanner>}
 
         {queueVisible && (
           <QueuePanel

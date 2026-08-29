@@ -12,7 +12,8 @@ An independent, secure, and resumable UI and orchestration layer for [`yt-dlp`](
 
 - Best available, 1080p, and 720p quality profiles
 - Live speed, ETA, item, pass, and total progress over SSE
-- Selectable playlist batches with original item numbers and completed-range tracking
+- Automatic 20-video batches sized to the inspected playlist, with original item numbers and completed-range tracking
+- Visible inspect, queue, download, and verification stages with actionable yt-dlp failure messages
 - Collapsible queue that appears only after a playlist URL is entered
 - Resume-aware retries, archive tracking, and final media verification
 - Configurable storage, app identity, quality, resource limits, ports, and tool paths
@@ -57,7 +58,7 @@ Copy [`.env.example`](.env.example) to `.env`. All settings are optional and hav
 | `APP_NAME` | `Playlist Downloader` | Name shown in the UI and page title |
 | `DEFAULT_QUALITY` | `best` | `best`, `1080`, or `720` |
 | `MAX_PLAYLIST_ITEMS` | `500` | Highest playlist position that can be selected |
-| `MAX_BATCH_ITEMS` | `20` | Maximum videos processed in one download job |
+| `MAX_BATCH_ITEMS` | `20` | Fixed batch size; keep this at `20` |
 | `MAX_TOTAL_DURATION_SECONDS` | `259200` | Maximum known media duration allowed in one batch |
 | `PLAYLIST_DOWNLOADS_ROOT` | `<app>/downloads` | Absolute persistent output directory |
 | `PORT` / `DEV_PORT` | `4173` / `5173` | Backend and Vite development ports |
@@ -88,7 +89,9 @@ npm run test:ui -- "https://www.youtube.com/playlist?list=PLAYLIST_ID"
 
 This app requires a long-running Node process, SSE connections, media executables, and writable storage. It is not compatible with static-only or serverless hosting. The included Render Blueprint uses the free tier and temporary storage; save verified files through the UI before the service resets.
 
-- [DEPLOY.md](DEPLOY.md): complete zero-cost Docker deployment on Render, including free-tier limits
+YouTube can reject traffic from shared cloud-provider IP addresses. When yt-dlp detects that condition, the UI reports it directly. A local Docker deployment uses your normal network and is the more reliable free option for media downloads.
+
+- [render.yaml](render.yaml): zero-cost Docker Blueprint for Render
 - [GUIDE.md](GUIDE.md): local staging and same-origin VPS deployment with systemd and Caddy
 
 Local and VPS deployments bind to `127.0.0.1` by default. Render mode binds publicly only when an exact HTTPS origin and password authentication are configured. Its descriptive HTML and static assets remain public for indexing, while every API route except the minimal health check remains authenticated. See [SECURITY.md](SECURITY.md) for the security boundary and reporting policy.

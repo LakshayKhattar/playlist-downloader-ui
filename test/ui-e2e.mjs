@@ -141,38 +141,9 @@ try {
       ranges: buttons.map((button) => button.querySelector('span')?.textContent),
     };
   })()`);
-  if (!batchControls.size || batchControls.ranges.length < 2 || batchControls.ranges[0] !== '1-20') {
+  if (batchControls.size !== 'Automatic - 20 videos' || batchControls.ranges.length !== 0) {
     throw new Error(`Batch controls are not ready: ${JSON.stringify(batchControls)}`);
   }
-  await cdp.evaluate(`(() => {
-    const select = document.querySelector('#batch-size');
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-    setter.call(select, '10');
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  await waitFor(
-    () => cdp.evaluate("document.querySelectorAll('.batch-option')[1]?.querySelector('span')?.textContent === '11-20'"),
-    2_000,
-    'ten-item batch layout',
-  );
-  await cdp.evaluate(`(() => {
-    const select = document.querySelector('#batch-size');
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-    setter.call(select, '20');
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  await waitFor(
-    () => cdp.evaluate("document.querySelectorAll('.batch-option')[1]?.querySelector('span')?.textContent === '21-40'"),
-    2_000,
-    'twenty-item batch layout',
-  );
-  await cdp.evaluate("document.querySelectorAll('.batch-option')[1]?.click()");
-  await waitFor(
-    () => cdp.evaluate("document.querySelector('.download-button')?.textContent.includes('21-40')"),
-    2_000,
-    'second batch selection',
-  );
-  if (!PLAYLIST_URL) await cdp.evaluate("document.querySelectorAll('.batch-option')[0]?.click()");
 
   const browserMutationStatus = await cdp.evaluate(`(async () => {
     const config = await fetch('/api/config', { cache: 'no-store' }).then((response) => response.json());
@@ -255,6 +226,17 @@ try {
       180_000,
       'bounded playlist preflight',
     );
+    const inspectedBatchControls = await cdp.evaluate(`(() => ({
+      ranges: [...document.querySelectorAll('.batch-option')].map((button) => button.querySelector('span')?.textContent),
+      status: document.querySelector('.activity-panel')?.dataset.status,
+      liveTitle: document.querySelector('#activity-title')?.textContent,
+    }))()`);
+    if (inspectedBatchControls.ranges[0] !== '1-20'
+      || !inspectedBatchControls.ranges[1]?.startsWith('21-')
+      || !['downloading', 'retrying'].includes(inspectedBatchControls.status)
+      || !inspectedBatchControls.liveTitle?.includes('batch 1-20')) {
+      throw new Error(`Automatic batch discovery or live status failed: ${JSON.stringify(inspectedBatchControls)}`);
+    }
     started = true;
     await cdp.evaluate("document.querySelector('.queue-actions .secondary-button')?.click()");
     await waitFor(

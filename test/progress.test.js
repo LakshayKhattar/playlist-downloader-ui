@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createLineReader, parseDownloaderLine } from '../server/progress.js';
 import { runCapture, runStreaming } from '../server/processes.js';
-import { buildDownloadArgs, buildPreflightArgs, idFromFilename, indexFromFilename, JobManager } from '../server/job-manager.js';
+import {
+  buildDownloadArgs,
+  buildPreflightArgs,
+  classifyDownloaderFailure,
+  idFromFilename,
+  indexFromFilename,
+  JobManager,
+} from '../server/job-manager.js';
 
 test('parses validated JSON item, progress, postprocess, and file markers', () => {
   assert.deepEqual(
@@ -140,18 +147,28 @@ test('download arguments preserve failure signals and final MKV output', () => {
   assert.match(args[args.indexOf('--output') + 1], /%\(playlist_index\)03d - \[%\(id\)s\]/);
 });
 
-test('preflight probes one item beyond a bounded batch and progress uses batch positions', () => {
-  const args = buildPreflightArgs('https://www.youtube.com/playlist?list=PL1234567890', {
-    startIndex: 21,
-    endIndex: 40,
-  });
-  assert.equal(args[args.indexOf('--playlist-start') + 1], '21');
-  assert.equal(args[args.indexOf('--playlist-end') + 1], '41');
+test('preflight discovers the real playlist length and progress uses batch positions', () => {
+  const args = buildPreflightArgs('https://www.youtube.com/playlist?list=PL1234567890');
+  assert.equal(args[args.indexOf('--playlist-start') + 1], '1');
+  assert.equal(args[args.indexOf('--playlist-end') + 1], '501');
 
   const jobs = Object.create(JobManager.prototype);
   jobs.job = { items: [{ id: 'abcdefghijk', index: 21 }, { id: 'lmnopqrstuv', index: 22 }] };
   assert.equal(jobs.batchPosition({ index: 21 }), 1);
   assert.equal(jobs.batchPosition({ id: 'lmnopqrstuv' }), 2);
+});
+
+test('yt-dlp diagnostics become safe actionable public failures', () => {
+  assert.deepEqual(
+    classifyDownloaderFailure('ERROR: Sign in to confirm you are not a bot'),
+    {
+      code: 'YOUTUBE_ACCESS_BLOCKED',
+      message: 'YouTube blocked this server from accessing the playlist. This commonly affects shared cloud IPs such as free Render services. Retry once; if it repeats, run the app locally where yt-dlp can use your normal connection.',
+    },
+  );
+  assert.equal(classifyDownloaderFailure('ERROR: HTTP Error 403: Forbidden').code, 'YOUTUBE_MEDIA_FORBIDDEN');
+  assert.equal(classifyDownloaderFailure('ERROR: Requested format is not available').code, 'FORMAT_UNAVAILABLE');
+  assert.equal(classifyDownloaderFailure('unexpected extractor failure').code, 'YTDLP_FAILED');
 });
 
 test('media identity survives new names and resumes legacy truncated names by playlist index', () => {

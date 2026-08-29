@@ -491,6 +491,141 @@ select {
   letter-spacing: 0.03em;
 }
 
+.batch-pending {
+  margin: 15px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.activity-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.activity-panel__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.activity-panel__summary h2 {
+  margin: 2px 0 0;
+  color: var(--text-high);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.activity-panel__summary p {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.activity-panel__count {
+  flex: 0 0 auto;
+  color: var(--text-high);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-stages {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 15px;
+  border: 1px solid var(--border);
+}
+
+.activity-stage {
+  min-width: 0;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border-right: 1px solid var(--border);
+  color: var(--text-low);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.activity-stage:last-child {
+  border-right: 0;
+}
+
+.activity-stage[data-state="active"],
+.activity-stage[data-state="failed"] {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.activity-stage[data-state="done"] {
+  color: var(--text-high);
+}
+
+.activity-stage strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-stage small {
+  color: inherit;
+  font-size: 7px;
+}
+
+.activity-progress {
+  height: 5px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--inset);
+}
+
+.activity-progress > span {
+  height: 100%;
+  display: block;
+  background: var(--primary);
+  transition: width 180ms linear;
+}
+
+.activity-progress--indeterminate > span {
+  width: 28%;
+  animation: activity-scan 1.1s linear infinite;
+}
+
+.activity-panel__meta {
+  min-height: 15px;
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.activity-panel__meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@keyframes activity-scan {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(370%); }
+}
+
 .error-banner {
   position: relative;
   margin-top: 16px;
@@ -526,6 +661,15 @@ select {
   margin: 4px 0 0;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.error-code {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
 }
 
 .queue-panel {
@@ -860,6 +1004,7 @@ progress::-moz-progress-bar {
   }
 
   .download-panel,
+  .activity-panel,
   .queue-panel {
     margin-top: 27px;
   }
@@ -871,6 +1016,23 @@ progress::-moz-progress-bar {
   .primary-form-row,
   .options-row {
     grid-template-columns: 1fr;
+  }
+
+  .activity-panel__summary {
+    display: grid;
+    gap: 8px;
+  }
+
+  .activity-stages {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .activity-stage:nth-child(2) {
+    border-right: 0;
+  }
+
+  .activity-stage:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
   }
 
   .primary-button {

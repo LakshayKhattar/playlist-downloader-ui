@@ -155,10 +155,7 @@ export const DOWNLOADS_LABEL = textSetting('DOWNLOADS_LABEL', 'downloads', {
   pattern: /^[A-Za-z0-9 ._-]+$/,
 });
 export const MAX_PLAYLIST_ITEMS = integerSetting('MAX_PLAYLIST_ITEMS', 500, { min: 1, max: 2000 });
-export const MAX_BATCH_ITEMS = integerSetting('MAX_BATCH_ITEMS', Math.min(20, MAX_PLAYLIST_ITEMS), {
-  min: 1,
-  max: MAX_PLAYLIST_ITEMS,
-});
+export const MAX_BATCH_ITEMS = integerSetting('MAX_BATCH_ITEMS', 20, { min: 20, max: 20 });
 export const MAX_TOTAL_DURATION_SECONDS = integerSetting('MAX_TOTAL_DURATION_SECONDS', 72 * 60 * 60, { min: 60, max: 30 * 24 * 60 * 60 });
 export const MAX_DOWNLOAD_BYTES = integerSetting('MAX_DOWNLOAD_BYTES', 80 * 1024 ** 3, { min: 1024 ** 3, max: 500 * 1024 ** 3 });
 export const MIN_FREE_BYTES = integerSetting('MIN_FREE_BYTES', 4 * 1024 ** 3, { min: 512 * 1024 ** 2, max: 100 * 1024 ** 3 });

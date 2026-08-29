@@ -62,8 +62,11 @@ export function parseDownloadRequest(body) {
   if (!Number.isSafeInteger(startIndex) || startIndex < 1 || startIndex > MAX_PLAYLIST_ITEMS) {
     throw new Error(`Choose a batch start between 1 and ${MAX_PLAYLIST_ITEMS}.`);
   }
-  if (!Number.isSafeInteger(requestedBatchSize) || requestedBatchSize < 1 || requestedBatchSize > MAX_BATCH_ITEMS) {
-    throw new Error(`Choose a batch size between 1 and ${MAX_BATCH_ITEMS}.`);
+  if ((startIndex - 1) % MAX_BATCH_ITEMS !== 0) {
+    throw new Error(`Batch starts must follow ${MAX_BATCH_ITEMS}-video boundaries.`);
+  }
+  if (requestedBatchSize !== MAX_BATCH_ITEMS) {
+    throw new Error(`Every batch uses exactly ${MAX_BATCH_ITEMS} videos, except the final shorter batch.`);
   }
   const endIndex = Math.min(MAX_PLAYLIST_ITEMS, startIndex + requestedBatchSize - 1);
   return { ...playlist, quality, startIndex, batchSize: endIndex - startIndex + 1, endIndex };

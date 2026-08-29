@@ -22,12 +22,14 @@ const MEDIA_EXTENSIONS = new Set(['.mkv', '.mp4', '.webm', '.mov']);
 const FINAL_EXTENSION = '.mkv';
 const MAX_SINGLE_FILE_BYTES = Math.min(20 * 1024 ** 3, MAX_DOWNLOAD_BYTES);
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+const MAX_DIAGNOSTIC_LINES = 12;
 
 class PublicJobError extends Error {
-  constructor(publicMessage, diagnostic = publicMessage) {
+  constructor(publicMessage, diagnostic = publicMessage, code = 'DOWNLOAD_FAILED') {
     super(diagnostic);
     this.name = 'PublicJobError';
     this.publicMessage = publicMessage;
+    this.publicCode = code;
   }
 }
 
@@ -82,8 +84,7 @@ export function publicFileName(name) {
     .slice(0, 240) || 'Downloaded file';
 }
 
-export function buildPreflightArgs(url, { startIndex = 1, endIndex = MAX_PLAYLIST_ITEMS } = {}) {
-  const probeEnd = Math.min(MAX_PLAYLIST_ITEMS, endIndex + 1);
+export function buildPreflightArgs(url) {
   return [
     '--ignore-config',
     '--flat-playlist',
@@ -96,10 +97,74 @@ export function buildPreflightArgs(url, { startIndex = 1, endIndex = MAX_PLAYLIS
     '--no-remote-components',
     '--no-plugin-dirs',
     '--ies', 'youtube:tab,youtube',
-    '--playlist-start', String(startIndex),
-    '--playlist-end', String(probeEnd),
+    '--playlist-start', '1',
+    '--playlist-end', String(MAX_PLAYLIST_ITEMS + 1),
     url,
   ];
+}
+
+function safeDiagnosticLine(value) {
+  return cleanText(value)
+    .replace(/https?:\/\/\S+/gi, '[URL]')
+    .replace(/(cookie|authorization|token)\s*[:=]\s*\S+/gi, '$1=[hidden]')
+    .slice(0, 300);
+}
+
+export function classifyDownloaderFailure(diagnostic, stage = 'download') {
+  const text = String(diagnostic || '');
+  if (/sign in to confirm|not a bot|login required|cookies (?:for authentication|are required)/i.test(text)) {
+    return {
+      code: 'YOUTUBE_ACCESS_BLOCKED',
+      message: 'YouTube blocked this server from accessing the playlist. This commonly affects shared cloud IPs such as free Render services. Retry once; if it repeats, run the app locally where yt-dlp can use your normal connection.',
+    };
+  }
+  if (/http error 403|forbidden|unable to download video data.*403/i.test(text)) {
+    return {
+      code: 'YOUTUBE_MEDIA_FORBIDDEN',
+      message: 'YouTube refused the media stream from this hosted server. Retry once; if it repeats, use the local Docker app because shared cloud IPs are often blocked.',
+    };
+  }
+  if (/private video|members-only|video unavailable|playlist does not exist|unavailable videos are hidden/i.test(text)) {
+    return {
+      code: 'MEDIA_UNAVAILABLE',
+      message: 'This playlist contains private, removed, restricted, or unavailable media that yt-dlp cannot access.',
+    };
+  }
+  if (/requested format is not available|no video formats found/i.test(text)) {
+    return {
+      code: 'FORMAT_UNAVAILABLE',
+      message: 'The selected quality is unavailable for one or more videos. Choose a lower quality and retry this batch.',
+    };
+  }
+  if (/no space left|disk quota|enospc/i.test(text)) {
+    return {
+      code: 'STORAGE_FULL',
+      message: 'The server ran out of temporary storage. Save completed files, clear the hosted storage, or run the app locally with more disk space.',
+    };
+  }
+  if (/javascript runtime|ejs|signature solving failed|nsig extraction failed/i.test(text)) {
+    return {
+      code: 'YOUTUBE_RUNTIME_REQUIRED',
+      message: 'YouTube changed its player checks and this deployment could not solve them. Rebuild the latest Docker image, then retry.',
+    };
+  }
+  if (/timed? out|temporary failure|network is unreachable|connection (?:reset|refused)|name or service not known/i.test(text)) {
+    return {
+      code: 'NETWORK_FAILURE',
+      message: `The server lost its connection while ${stage === 'inspect' ? 'inspecting the playlist' : 'downloading this batch'}. Retry to resume completed and partial files.`,
+    };
+  }
+  return {
+    code: 'YTDLP_FAILED',
+    message: `yt-dlp could not ${stage === 'inspect' ? 'inspect this playlist' : 'finish this batch'}. Retry once to resume; if it fails again, check the service logs for the yt-dlp error.`,
+  };
+}
+
+function downloaderError(diagnostic, stage, exitCode = null) {
+  const failure = classifyDownloaderFailure(diagnostic, stage);
+  const safeLines = String(diagnostic || '').split(/\r?\n/).map(safeDiagnosticLine).filter(Boolean).slice(-MAX_DIAGNOSTIC_LINES);
+  const suffix = exitCode === null ? '' : ` (exit ${exitCode})`;
+  return new PublicJobError(failure.message, `yt-dlp ${stage} failed${suffix}${safeLines.length ? `: ${safeLines.join(' | ')}` : ''}`, failure.code);
 }
 
 export function buildDownloadArgs({
@@ -333,6 +398,11 @@ export function toPublicJob(job) {
     pass: job.pass,
     destination: job.destination,
     quality: job.quality,
+    playlist: job.playlist ? {
+      itemCount: job.playlist.itemCount,
+      sourceItemCount: job.playlist.sourceItemCount,
+      limitReached: job.playlist.limitReached,
+    } : null,
     batch: job.batch ? {
       start: job.batch.start,
       end: job.batch.end,
@@ -355,6 +425,7 @@ export function toPublicJob(job) {
       partialCount: job.verification.partialCount,
     },
     error: job.error,
+    errorCode: job.errorCode || null,
   });
 }
 
@@ -439,8 +510,9 @@ export class JobManager {
     if (!isPathInside(this.rootReal, outputDirectory)) throw new Error('Unsafe playlist destination.');
     this.job = {
       id: randomUUID(), url, playlistId, quality, playlistTitle: '', status: 'preparing',
-      message: 'Reading playlist details', totalItems: 0, completedItems: 0, overallPercent: 0,
+      message: `Inspecting the playlist and counting up to ${MAX_PLAYLIST_ITEMS} videos`, totalItems: 0, completedItems: 0, overallPercent: 0,
       destination: `${DOWNLOADS_LABEL}/${folder}`,
+      playlist: null,
       batch: {
         start: startIndex, end: endIndex, requestedSize: batchSize,
         hasMore: null, nextStart: null, unavailableCount: 0,
@@ -449,7 +521,7 @@ export class JobManager {
       current: { index: 0, title: '', percent: null, speed: '', eta: '' },
       items: [], files: [],
       verification: { status: 'pending', checked: 0, total: 0, valid: 0, invalidCount: 0, missingCount: 0, partialCount: 0 },
-      outputDirectory, pass: 0, error: null, startedAt: Date.now(),
+      outputDirectory, pass: 0, error: null, errorCode: null, startedAt: Date.now(),
     };
     this.abortController = new AbortController();
     this.resourceError = null;
@@ -540,15 +612,12 @@ export class JobManager {
     const archivePath = path.join(this.job.outputDirectory, '.download-archive.txt');
     await assertNormalFileIfPresent(archivePath, this.job.outputDirectory);
 
-    const preflight = await runCapture(this.tools.ytDlp, buildPreflightArgs(this.job.url, {
-      startIndex: this.job.batch.start,
-      endIndex: this.job.batch.end,
-    }), {
+    const preflight = await runCapture(this.tools.ytDlp, buildPreflightArgs(this.job.url), {
       timeoutMs: 180_000, maxOutput: 30_000_000, signal: this.abortController.signal,
       cwd: this.job.outputDirectory,
     });
     if (preflight.code !== 0 || !preflight.stdout.trim()) {
-      throw new PublicJobError('The playlist could not be read. Check the URL and your internet connection.');
+      throw downloaderError(preflight.stderr, 'inspect', preflight.code);
     }
     let playlist;
     try {
@@ -558,22 +627,38 @@ export class JobManager {
     }
 
     const rawEntries = Array.isArray(playlist.entries) ? playlist.entries : [];
-    const batchEntries = rawEntries.slice(0, this.job.batch.requestedSize);
+    const reportedItemCount = Number(playlist.playlist_count);
+    const sourceItemCount = Number.isSafeInteger(reportedItemCount) && reportedItemCount > 0
+      ? Math.max(reportedItemCount, rawEntries.length)
+      : rawEntries.length;
+    const itemCount = Math.min(sourceItemCount, MAX_PLAYLIST_ITEMS, rawEntries.length);
+    const boundedEntries = rawEntries.slice(0, itemCount);
+    const batchEntries = boundedEntries.slice(this.job.batch.start - 1, this.job.batch.end);
     const unavailableCount = batchEntries.filter((entry) => !entry || !VIDEO_ID.test(entry.id || '')).length;
     const expected = uniqueEntries(batchEntries, this.job.batch.start);
-    if (!expected.length) throw new PublicJobError('No downloadable videos were found in this batch range.');
+    if (!itemCount) throw new PublicJobError('No videos were found in this playlist.', undefined, 'EMPTY_PLAYLIST');
+    if (!expected.length) throw new PublicJobError('No downloadable videos were found in this batch range.', undefined, 'EMPTY_BATCH');
     if (expected.some((entry) => entry.live)) throw new PublicJobError('Live or upcoming streams cannot be downloaded by this app.');
     const knownDuration = expected.reduce((total, entry) => total + (entry.duration || 0), 0);
     if (knownDuration > MAX_TOTAL_DURATION_SECONDS) {
-      throw new PublicJobError(`This batch exceeds the ${MAX_TOTAL_DURATION_SECONDS / 3600}-hour duration limit. Select a smaller batch size and retry.`);
+      throw new PublicJobError(
+        `This 20-video batch exceeds the configured ${MAX_TOTAL_DURATION_SECONDS / 3600}-hour media limit. Use a local deployment with a higher MAX_TOTAL_DURATION_SECONDS value.`,
+        undefined,
+        'DURATION_LIMIT',
+      );
     }
     const fallbackEnd = this.job.batch.start + batchEntries.length - 1;
     const lastKnownIndex = expected.reduce((maximum, entry) => Math.max(maximum, entry.index), 0);
-    const actualEnd = Math.min(this.job.batch.end, Math.max(this.job.batch.start, fallbackEnd, lastKnownIndex));
-    const hasMore = actualEnd < MAX_PLAYLIST_ITEMS && rawEntries.length > batchEntries.length;
+    const actualEnd = Math.min(itemCount, this.job.batch.end, Math.max(this.job.batch.start, fallbackEnd, lastKnownIndex));
+    const hasMore = actualEnd < itemCount;
 
     this.update({
       playlistTitle: cleanText(playlist.title || playlist.playlist_title, 'YouTube playlist'),
+      playlist: {
+        itemCount,
+        sourceItemCount,
+        limitReached: sourceItemCount > MAX_PLAYLIST_ITEMS || rawEntries.length > MAX_PLAYLIST_ITEMS,
+      },
       totalItems: expected.length,
       batch: {
         ...this.job.batch,
@@ -586,7 +671,7 @@ export class JobManager {
         index: entry.index, batchPosition: offset + 1, id: entry.id,
         title: entry.title, status: 'queued', percent: 0, speed: '', eta: '',
       })),
-      message: `Batch ${this.job.batch.start}-${actualEnd}: ${expected.length} downloadable item${expected.length === 1 ? '' : 's'}${unavailableCount ? `; ${unavailableCount} unavailable skipped` : ''}`,
+      message: `Playlist inspected: ${itemCount} video${itemCount === 1 ? '' : 's'}; preparing batch ${this.job.batch.start}-${actualEnd}${unavailableCount ? `; ${unavailableCount} unavailable skipped` : ''}`,
     });
 
     let missing = new Set(expected.map((entry) => entry.id));
@@ -599,7 +684,9 @@ export class JobManager {
       }
       this.update({
         status: pass === 1 ? 'downloading' : 'retrying', pass,
-        message: pass === 1 ? 'Downloading playlist' : `Retrying ${missing.size} incomplete item${missing.size === 1 ? '' : 's'}`,
+        message: pass === 1
+          ? `Connecting to YouTube for batch ${this.job.batch.start}-${this.job.batch.end}`
+          : `Retrying ${missing.size} incomplete item${missing.size === 1 ? '' : 's'}`,
       });
 
       let passError = null;
@@ -630,8 +717,20 @@ export class JobManager {
   async downloadPass(archivePath) {
     await checkStorage(this.job.outputDirectory);
     const rejectOversizedLine = (error) => { throw error; };
-    const stdoutReader = createLineReader((line) => this.handleLine(line), { onOverflow: rejectOversizedLine });
-    const stderrReader = createLineReader((line) => this.handleLine(line), { onOverflow: rejectOversizedLine });
+    const diagnostics = [];
+    const handleOutputLine = (line) => {
+      const event = parseDownloaderLine(line);
+      if (event.type === 'log') {
+        const safeLine = safeDiagnosticLine(line);
+        if (safeLine) {
+          diagnostics.push(safeLine);
+          if (diagnostics.length > MAX_DIAGNOSTIC_LINES) diagnostics.shift();
+        }
+      }
+      this.handleEvent(event);
+    };
+    const stdoutReader = createLineReader(handleOutputLine, { onOverflow: rejectOversizedLine });
+    const stderrReader = createLineReader(handleOutputLine, { onOverflow: rejectOversizedLine });
     const remaining = Math.max(1_000, MAX_JOB_RUNTIME_MS - (Date.now() - this.job.startedAt));
     const storageTimer = setInterval(() => {
       void checkStorage(this.job.outputDirectory).catch((error) => {
@@ -659,7 +758,7 @@ export class JobManager {
       });
       stdoutReader.flush();
       stderrReader.flush();
-      if (result.code !== 0) throw new Error(`yt-dlp exited with code ${result.code}.`);
+      if (result.code !== 0) throw downloaderError(diagnostics.join('\n'), 'download', result.code);
     } finally {
       clearInterval(storageTimer);
     }
@@ -674,11 +773,18 @@ export class JobManager {
   }
 
   handleLine(line) {
-    const event = parseDownloaderLine(line);
+    this.handleEvent(parseDownloaderLine(line));
+  }
+
+  handleEvent(event) {
     if (!this.job || event.type === 'log') return;
     if (event.type === 'item') {
+      const batchPosition = this.batchPosition(event);
       this.setItem(event, { status: 'downloading', percent: 0, speed: '', eta: '' });
-      this.update({ current: { index: event.index, title: event.title, percent: 0, speed: '', eta: '' } });
+      this.update({
+        message: `Starting video ${batchPosition} of ${this.job.totalItems}`,
+        current: { index: event.index, position: batchPosition, title: event.title, percent: 0, speed: '', eta: '' },
+      });
       return;
     }
     if (event.type === 'progress') {
@@ -688,14 +794,19 @@ export class JobManager {
       const completeBefore = Math.max(0, batchPosition - 1);
       this.setItem(event, { status: 'downloading', percent, speed: event.speed, eta: event.eta });
       this.update({
+        message: `Downloading video ${batchPosition} of ${this.job.totalItems}`,
         overallPercent: Math.min(99.9, ((completeBefore + percent / 100) / Math.max(1, this.job.totalItems)) * 100),
-        current: { index, title: event.title || this.job.current.title, percent, speed: event.speed, eta: event.eta },
+        current: { index, position: batchPosition, title: event.title || this.job.current.title, percent, speed: event.speed, eta: event.eta },
       });
       return;
     }
     if (event.type === 'postprocess') {
+      const batchPosition = this.batchPosition(event);
       this.setItem(event, { status: 'verifying', percent: 100, speed: '', eta: '' });
-      this.update({ current: { ...this.job.current, index: event.index, title: event.title || this.job.current.title, percent: 100, speed: '', eta: '' } });
+      this.update({
+        message: `Processing video ${batchPosition} of ${this.job.totalItems}`,
+        current: { ...this.job.current, index: event.index, position: batchPosition, title: event.title || this.job.current.title, percent: 100, speed: '', eta: '' },
+      });
       return;
     }
     if (event.type === 'done') {
@@ -703,9 +814,10 @@ export class JobManager {
       const completedItems = Math.max(this.job.completedItems, Math.min(batchPosition, this.job.totalItems));
       this.setItem(event, { status: 'done', percent: 100, speed: '', eta: '' });
       this.update({
+        message: `Finished video ${completedItems} of ${this.job.totalItems}`,
         completedItems,
         overallPercent: this.job.totalItems ? (completedItems / this.job.totalItems) * 100 : this.job.overallPercent,
-        current: { index: event.index, title: event.title || this.job.current.title, percent: 100, speed: '', eta: '' },
+        current: { index: event.index, position: batchPosition, title: event.title || this.job.current.title, percent: 100, speed: '', eta: '' },
       });
       void this.addCompletedFile(event.filePath);
     }
@@ -767,6 +879,7 @@ export class JobManager {
       this.update({
         status: 'failed', message: 'Verification did not pass',
         error: `${problemCount} item${problemCount === 1 ? '' : 's'} remain incomplete after ${MAX_DOWNLOAD_PASSES} automatic passes. Partial files were kept for resume.`,
+        errorCode: 'VERIFICATION_FAILED',
         verification: {
           ...this.job.verification, status: 'failed', invalidCount: invalid.length,
           missingCount: Math.max(missing.length, archiveMissing.length), partialCount: partialFiles.length,
@@ -784,7 +897,7 @@ export class JobManager {
     this.update({
       status: 'completed', message: `Batch ${this.job.batch.start}-${this.job.batch.end} downloaded and verified`,
       completedItems: expected.length, completedBatches,
-      overallPercent: 100, error: null,
+      overallPercent: 100, error: null, errorCode: null,
       verification: { ...this.job.verification, status: 'passed', missingCount: 0, invalidCount: 0, partialCount: 0 },
     });
   }
@@ -793,13 +906,13 @@ export class JobManager {
     if (!this.job) return;
     if (this.resourceError) error = this.resourceError;
     if (this.abortController?.signal.aborted && !this.resourceError) {
-      this.update({ status: 'canceled', message: 'Download canceled; partial files are available to resume', error: null });
+      this.update({ status: 'canceled', message: 'Download canceled; partial files are available to resume', error: null, errorCode: null });
       return;
     }
     console.error('Download job failed:', error);
-    const message = error instanceof PublicJobError
-      ? error.publicMessage
-      : 'The download could not finish. Check the local service console, then retry to resume.';
-    this.update({ status: 'failed', message: 'Download stopped', error: message });
+    const failure = error instanceof PublicJobError
+      ? { message: error.publicMessage, code: error.publicCode }
+      : classifyDownloaderFailure(error?.message, 'download');
+    this.update({ status: 'failed', message: 'Download stopped', error: failure.message, errorCode: failure.code });
   }
 }

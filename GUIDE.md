@@ -2,7 +2,7 @@
 
 This application needs Node.js, `yt-dlp`, `ffmpeg`, storage, and long-lived HTTP/SSE connections. It is not suitable for static-only or serverless hosting.
 
-For a complete Docker deployment on Render, use [DEPLOY.md](DEPLOY.md). This guide covers local staging and a conventional VPS.
+For Render, deploy the repository as a Blueprint using [render.yaml](render.yaml). This guide covers local staging and a conventional VPS.
 
 ## 1. Test a local staging build
 

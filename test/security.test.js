@@ -215,6 +215,7 @@ test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs
     id: '00000000-0000-4000-8000-000000000000',
     status: 'downloading', message: 'Downloading playlist', playlistTitle: 'List', totalItems: 1,
     completedItems: 0, overallPercent: 10, pass: 1, destination: 'downloads\\PL1234567890', quality: 'best',
+    playlist: { itemCount: 29, sourceItemCount: 29, limitReached: false },
     batch: { start: 21, end: 40, requestedSize: 20, hasMore: true, nextStart: 41, unavailableCount: 0 },
     completedBatches: [{ start: 1, end: 20 }],
     current: { index: 1, title: 'Track', percent: 10, speed: '1 MiB/s', eta: '10' },
@@ -227,6 +228,7 @@ test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs
     ],
     verification: { status: 'pending', checked: 0, total: 0, valid: 0, invalidCount: 0, missingCount: 0, partialCount: 0 },
     error: null,
+    errorCode: null,
     url: 'https://www.youtube.com/playlist?list=secret',
     playlistId: 'secret',
     outputDirectory: 'C:\\Users\\private\\downloads',
@@ -239,6 +241,7 @@ test('public job DTO strips URLs, absolute paths, raw diagnostics, and media IDs
   assert.equal('id' in publicJob.items[0], false);
   assert.deepEqual(publicJob.batch, { start: 21, end: 40, requestedSize: 20, hasMore: true, nextStart: 41, unavailableCount: 0 });
   assert.deepEqual(publicJob.completedBatches, [{ start: 1, end: 20 }]);
+  assert.deepEqual(publicJob.playlist, { itemCount: 29, sourceItemCount: 29, limitReached: false });
   assert.equal(publicJob.files[0].name, '001 - Track.mkv');
   assert.equal(publicJob.files[0].index, 1);
   assert.equal(publicJob.files[0].downloadUrl, '/api/jobs/00000000-0000-4000-8000-000000000000/files/0');
