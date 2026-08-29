@@ -9,7 +9,6 @@ services:
     dockerContext: .
     autoDeployTrigger: checksPass
     healthCheckPath: /api/health
-    maxShutdownDelaySeconds: 120
     numInstances: 1
     envVars:
       - key: NODE_ENV
