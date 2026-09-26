@@ -33,7 +33,7 @@
     "verify": "npm run test && npm run build && npm run audit:offline"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.3",
     "express": "^5.1.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
